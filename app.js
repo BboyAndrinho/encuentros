@@ -224,7 +224,9 @@ function registrar(enc, t) {
   c.log.push({ a: c.asalto, t });
   if (c.log.length > 300) c.log.shift();
 }
-const saltar = p => p.tipo !== 'pj' && p.derrotado;
+const muertoPJ = p => p.tipo === 'pj' && p.pg === 0 && p.muerte && p.muerte.ko >= 3;
+// Los monstruos derrotados y los jugadores muertos no tienen turno
+const saltar = p => (p.tipo !== 'pj' && p.derrotado) || muertoPJ(p);
 
 function limpiarOrden(enc) {
   const c = enc.combate;
@@ -265,13 +267,14 @@ function tick(enc, pid, momento, av) {
   }
 }
 function finTurno(enc, p, av) {
+  // Primero terminan los estados que se acaban; solo se pide TS de los que siguen activos
+  tick(enc, p.id, 'fin', av);
   for (const s of p.estados) {
     if (s.ts) av.push({
       t: `${p.nombre}: TS de ${CARS_LARGO[s.ts.car]}${s.ts.cd ? ' CD ' + s.ts.cd : ''} para librarse de «${s.nombre}»`,
       accion: { q: 'quitarEstado', pid: p.id, uid: s.uid, txt: 'Superada' }
     });
   }
-  tick(enc, p.id, 'fin', av);
 }
 function inicioTurno(enc, p, av) {
   p.reaccion = false;
@@ -324,6 +327,7 @@ function aplicarDanio(enc, p, n, av) {
     if (p.conc) { p.conc = false; av.push({ t: `${p.nombre} pierde la concentración`, tipo: 'info' }); }
     if (p.tipo === 'pj') {
       if (resto - antes >= p.pgMax) {
+        p.muerte = { ok: 0, ko: 3 }; p.estable = false;
         av.push({ t: `${p.nombre}: el daño sobrante (${resto - antes}) iguala o supera sus PG máximos: muerte instantánea`, tipo: 'malo' });
       } else {
         if (!p.estados.some(s => s.id === 'inconsciente')) p.estados.push(nuevoEstado('inconsciente', { auto: true }));
@@ -400,8 +404,7 @@ function abrirHoja(render, opts = {}) {
     const i = hojas.indexOf(h); if (i >= 0) hojas.splice(i, 1);
     const t = $('#toast', d); if (t) document.body.appendChild(t);
     d.remove();
-    if (h._pushPend) { h._pushPend = false; h._porAtras = true; }
-    if (!h._porAtras) { ignorarPop++; history.back(); }
+    programarHistorial();
     opts.alCerrar && opts.alCerrar();
   });
   d.addEventListener('click', e => { if (e.target === d) h.cerrar(); });
@@ -409,27 +412,50 @@ function abrirHoja(render, opts = {}) {
   h.pintar();
   d.showModal();
   hojas.push(h);
-  // Si todavía se está cerrando otra hoja, esperamos a que termine para no liar el historial
-  if (ignorarPop > 0) h._pushPend = true;
-  else history.pushState({ hoja: true }, '');
+  programarHistorial();
   return h;
 }
 const hojaActual = () => hojas[hojas.length - 1];
-window.addEventListener('popstate', () => {
-  if (ignorarPop > 0) {
-    ignorarPop--;
-    if (!ignorarPop) {
-      for (const h of hojas) if (h._pushPend) { h._pushPend = false; history.pushState({ hoja: true }, ''); }
-      if (navPendiente) { const n = navPendiente; navPendiente = null; location.hash = n; }
-    }
-    return;
+
+// Historial del navegador y hojas: cada hoja abierta tiene una entrada en el historial para que
+// el botón Atrás de Android la cierre. En vez de añadir y quitar entradas en cada apertura y
+// cierre, se cuadran al final (así, cerrar una hoja y abrir otra no toca el historial).
+let entradasHoja = 0, sincProgramada = false;
+function programarHistorial() {
+  if (sincProgramada) return;
+  sincProgramada = true;
+  setTimeout(cuadrarHistorial, 0);
+}
+function cuadrarHistorial() {
+  sincProgramada = false;
+  if (ignorarPop > 0) return; // se cuadrará cuando llegue el popstate pendiente
+  const dif = hojas.length - entradasHoja;
+  if (dif > 0) {
+    for (let i = 0; i < dif; i++) history.pushState({ hoja: true }, '');
+    entradasHoja += dif;
+  } else if (dif < 0) {
+    ignorarPop++;
+    entradasHoja += dif;
+    history.go(dif);
+  } else if (navPendiente) {
+    const n = navPendiente; navPendiente = null; location.hash = n;
   }
-  const h = hojaActual();
-  if (h) { h._porAtras = true; h.el.close(); }
+}
+window.addEventListener('popstate', () => {
+  if (ignorarPop > 0) { ignorarPop--; if (!ignorarPop) cuadrarHistorial(); return; }
+  // El usuario ha pulsado Atrás: si hay una hoja abierta, se cierra y no se cambia de pantalla
+  if (entradasHoja > 0) {
+    entradasHoja--;
+    const h = hojaActual();
+    if (h) h.cerrar();
+  }
 });
 function navegar(hash) {
-  if (hojas.length || ignorarPop) { navPendiente = hash; [...hojas].reverse().forEach(h => h.cerrar()); }
-  else location.hash = hash;
+  if (hojas.length || entradasHoja || ignorarPop || sincProgramada) {
+    navPendiente = hash;
+    [...hojas].reverse().forEach(h => h.cerrar());
+    programarHistorial();
+  } else location.hash = hash;
 }
 function preguntar(texto, opciones) {
   return new Promise(res => {
@@ -579,7 +605,7 @@ function carta(enc, p) {
   for (const s of p.estados) chips.push(`<span class="est">${esc(s.nombre)}${s.nivel ? ' ' + s.nivel : ''}${s.rondas != null ? ` <b>${s.rondas}</b>` : ''}</span>`);
   if (p.reaccion) chips.push(`<span class="est gris">Reacción usada</span>`);
   if (p.leg) chips.push(`<span class="est gris">Leg. ${p.leg.max - p.leg.usadas}/${p.leg.max}</span>`);
-  return `<div class="carta ${p.tipo}${p.aliado ? ' aliado' : ''}${actual ? ' actual' : ''}${p.derrotado ? ' caido' : ''}" data-a="abrirPart" data-pid="${p.id}" role="button" tabindex="0">
+  return `<div class="carta ${p.tipo}${p.aliado ? ' aliado' : ''}${actual ? ' actual' : ''}${p.derrotado || muertoPJ(p) ? ' caido' : ''}" data-a="abrirPart" data-pid="${p.id}" role="button" tabindex="0">
     <div class="c-ini">${t ?? '—'}</div>
     <div class="c-cuerpo"><div class="c-nom">${esc(p.nombre)}</div>${chips.length ? `<div class="c-est">${chips.join('')}</div>` : ''}</div>
     <div class="c-der"><div class="c-ca">${ic(IC.escudo)}${p.ca ?? '—'}</div><div class="c-pg ${nivel}">${p.pg}<small>/${p.pgMax}</small>${p.pgTemp ? `<em>+${p.pgTemp}</em>` : ''}</div><div class="barra ${nivel}"><i style="width:${pct}%"></i></div></div>
@@ -609,7 +635,7 @@ VISTAS.combate = id => {
   const pie = `<button class="btn secundario" data-a="deshacer" aria-label="Deshacer">${ic(IC.deshacer)}</button>
     <button class="btn primario grande" data-a="siguienteTurno">Siguiente turno${sig ? `<small>${esc(sig.nombre)}</small>` : ''}</button>`;
   return {
-    titulo: `${enc.nombre} · Asalto ${c.asalto}`, atras: `#/encuentro/${enc.id}`, sinNav: true, html, pie,
+    titulo: `Asalto ${c.asalto} · ${enc.nombre}`, atras: `#/encuentro/${enc.id}`, sinNav: true, html, pie,
     acciones: `<button class="icono" data-a="menuCombate" aria-label="Más opciones">${ic(IC.puntos)}</button>`
   };
 };
@@ -634,7 +660,7 @@ function resumenIniPJ(pj) {
 }
 VISTAS.personaje = id => {
   const pj = pjPorId(id); if (!pj) return null;
-  const campo = (k, etiqueta, tipo = 'text', extra = '') => `<label class="campo"><span>${etiqueta}</span><input data-in="pj" data-k="${k}" type="${tipo}" ${tipo === 'number' ? 'inputmode="numeric"' : ''} value="${esc(pj[k] ?? '')}" ${extra}></label>`;
+  const campo = (k, etiqueta, tipo = 'text', extra = '') => `<label class="campo"><span>${etiqueta}</span><input data-in="pj" data-ch="pjSync" data-k="${k}" type="${tipo}" ${tipo === 'number' ? 'inputmode="numeric"' : ''} value="${esc(pj[k] ?? '')}" ${extra}></label>`;
   const html = `
     ${campo('nombre', 'Nombre del personaje')}
     ${campo('jugador', 'Jugador (opcional)')}
@@ -913,14 +939,14 @@ function filaIniNuevo(p) {
     </div>
   </div>`;
 }
-function hojaIniNuevos(encId, nuevos, aplicar) {
+function hojaIniNuevos(encId, nuevos, aplicar, despues) {
   if (!nuevos.length) return;
   const h = abrirHoja(() => `<div class="hp-cab"><div><h3>Iniciativa de los que llegan</h3><div class="sub">Escribe lo que saca cada uno en el d20. Si lo dejas vacío, se usa la iniciativa fija (10 + mod.).</div></div><button class="icono" data-a="cerrarHoja" aria-label="Cancelar">${ic(IC.cerrar)}</button></div>
     ${nuevos.length > 1 ? `<button class="btn peq" data-a="iniCopiar">Copiar la primera tirada a todos</button>` : ''}
     ${nuevos.map(filaIniNuevo).join('')}
     <button class="btn primario ancho" data-a="iniNuevosOk">${ic(IC.espadas)} Añadir al combate</button>`,
     { fija: true, alPintar: () => setTimeout(() => { const i = $('[data-in="tiradaNuevo"]', h.el); if (i) i.focus(); }, 80) });
-  h.encId = encId; h.nuevos = nuevos; h.aplicar = aplicar;
+  h.encId = encId; h.nuevos = nuevos; h.aplicar = aplicar; h.despues = despues;
 }
 
 function hojaMenuCombate() {
@@ -979,7 +1005,7 @@ A.borrarEnc = async () => {
 };
 A.restablecer = async () => {
   const enc = encActual(); if (!enc) return;
-  const ok = await preguntar('¿Restablecer el encuentro? Todos recuperan sus PG, se quitan los estados y se borran las tiradas de iniciativa.', [{ t: 'Restablecer', v: true, clase: 'primario' }, { t: 'Cancelar' }]);
+  const ok = await preguntar(`¿Restablecer el encuentro? Todos recuperan sus PG, se quitan los estados y se borran las tiradas de iniciativa.${enc.combate ? ' <b>El combate en curso también terminará.</b>' : ''}`, [{ t: 'Restablecer', v: true, clase: 'primario' }, { t: 'Cancelar' }]);
   if (!ok) return;
   for (const p of enc.participantes) { p.pg = p.pgMax; p.pgTemp = 0; p.estados = []; p.conc = false; p.reaccion = false; p.derrotado = false; p.muerte = { ok: 0, ko: 0 }; p.estable = false; p.ini.tirada = null; p.ini.manual = null; if (p.leg) p.leg.usadas = 0; }
   enc.combate = null; enc.mod = Date.now(); guardar(); refrescar();
@@ -1031,6 +1057,7 @@ A.iniNuevosOk = () => {
   h.cerrar();
   const n = h.nuevos.length;
   toast(`${n === 1 ? h.nuevos[0].nombre + ' se une' : n + ' criaturas se unen'} al combate${fijas.length ? ` (${fijas.length} con iniciativa fija)` : ''}`);
+  if (h.despues) navegar(h.despues);
 };
 const nuevoDeHoja = pid => { const h = hojaActual(); return h && h.nuevos && h.nuevos.find(p => p.id === pid); };
 function actTotalNuevo(p) { const t = $(`[data-tn="${p.id}"]`, hojaActual().el); if (t) t.innerHTML = textoTotalNuevo(p); }
@@ -1074,6 +1101,7 @@ A.editarOk = () => {
   const v = id => { const e = $('#' + id, h.el); return e ? e.value : undefined; };
   const hacer = () => {
     const iniAntes = totalIni(p);
+    const pgAntes = p.pg;
     p.nombre = v('e-nombre').trim() || p.nombre;
     if (p.nombre !== h.nombreOriginal) p.nombreAuto = false;
     p.ca = num(v('e-ca'), p.ca);
@@ -1090,7 +1118,10 @@ A.editarOk = () => {
     p.ini.usarBC = $('#e-usarbc', h.el).checked;
     p.ini.manual = num(v('e-manual'));
     const al = $('#e-aliado', h.el); if (al) p.aliado = al.checked;
-    if (p.pg > 0 && p.tipo !== 'pj') p.derrotado = false;
+    if (p.tipo !== 'pj') {
+      if (p.pg === 0) p.derrotado = true;
+      else if (pgAntes === 0) p.derrotado = false;
+    }
     if (enc.combate && totalIni(p) !== iniAntes) {
       enc.combate.orden = enc.combate.orden.filter(id => id !== p.id);
       insertarEnOrden(enc, p);
@@ -1132,16 +1163,28 @@ A.monAEncuentro = el => hojaMonAEncuentro(el.dataset.id);
 A.monAEncOk = el => {
   const h = hojaActual(); const m = MON.get(h.mid); if (!m) return;
   let enc = encPorId(el.dataset.enc);
+  if (enc && enc.combate) {
+    // Combate empezado: primero se pide la iniciativa y luego vamos al combate
+    const r = crearMonstruos(enc, m, cantidadMon);
+    h.cerrar();
+    hojaIniNuevos(enc.id, r.nuevos, r.aplicar, '#/combate/' + enc.id);
+    return;
+  }
   if (!enc) { enc = { id: uid(), nombre: `Encuentro ${E.encuentros.length + 1}`, participantes: [], combate: null, notas: '', mod: Date.now() }; E.encuentros.push(enc); }
-  const nuevos = anadirMonstruos(enc, m, cantidadMon);
-  if (enc.combate) for (const p of nuevos) { p.ini.tirada = 10; insertarEnOrden(enc, p); }
+  anadirMonstruos(enc, m, cantidadMon);
   enc.mod = Date.now(); guardar();
   toast(`${cantidadMon} × ${m.nombre} → ${enc.nombre}`);
   navegar('#/encuentro/' + enc.id);
 };
 
 // --- Combate
-A.siguienteTurno = () => { const enc = encActual(); if (enc && enc.combate) accionCombate(enc, () => pasarTurno(enc)); };
+let ultimoPaseTurno = 0;
+A.siguienteTurno = () => {
+  // Evita saltarse a alguien por un doble toque sin querer
+  if (Date.now() - ultimoPaseTurno < 600) return;
+  ultimoPaseTurno = Date.now();
+  const enc = encActual(); if (enc && enc.combate) accionCombate(enc, () => pasarTurno(enc));
+};
 A.deshacer = () => {
   const enc = encActual(); if (!enc) return;
   const pila = pilasDeshacer[enc.id];
@@ -1323,8 +1366,8 @@ function mover(pid, d) {
 A.historial = () => {
   const enc = encActual(); if (!enc || !enc.combate) return;
   hojaActual().cerrar();
-  setTimeout(() => abrirHoja(() => `<div class="hp-cab"><div><h3>Historial</h3></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
-    <div class="historial">${(enc.combate.log || []).slice().reverse().map(l => `<p><b>A${l.a}</b>${esc(l.t)}</p>`).join('') || '<p class="vacio">Todavía no ha pasado nada.</p>'}</div>`, { fija: true }), 30);
+  abrirHoja(() => `<div class="hp-cab"><div><h3>Historial</h3></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
+    <div class="historial">${(enc.combate.log || []).slice().reverse().map(l => `<p><b>A${l.a}</b>${esc(l.t)}</p>`).join('') || '<p class="vacio">Todavía no ha pasado nada.</p>'}</div>`, { fija: true });
 };
 A.terminarCombate = async () => {
   const enc = encActual(); if (!enc) return;
@@ -1368,7 +1411,7 @@ A.borrarTodo = async () => {
 
 // ============ Campos (escritura) ============
 const I = {};
-I.encNombre = el => { const enc = encActual(); if (!enc) return; enc.nombre = el.value; enc.mod = Date.now(); guardar(); $('#cabecera h1').textContent = el.value; };
+I.encNombre = el => { const enc = encActual(); if (!enc) return; enc.nombre = el.value; enc.mod = Date.now(); guardar(); $('#cabecera h1').textContent = el.value; document.title = el.value + ' · Encuentros D&D'; };
 I.encNotas = el => { const enc = encActual(); if (!enc) return; enc.notas = el.value; guardar(); };
 I.tirada = el => {
   const enc = encActual(); const p = partPorId(enc, el.dataset.pid); if (!p) return;
@@ -1399,7 +1442,35 @@ C.pjchk = el => {
   const pj = pjPorId(ruta().id); if (!pj) return;
   pj[el.dataset.k] = el.checked; guardar();
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
+  sincronizarPJ(pj, el.dataset.k);
 };
+// Al terminar de escribir un campo del perfil (al salir de la casilla)
+C.pjSync = el => {
+  const pj = pjPorId(ruta().id); if (!pj) return;
+  if (el.dataset.k === 'nivel') el.value = pj.nivel ?? '';
+  sincronizarPJ(pj, el.dataset.k);
+};
+// Lleva los cambios del perfil a los encuentros donde ya está ese personaje
+function sincronizarPJ(pj, k) {
+  let n = 0;
+  for (const enc of E.encuentros) for (const p of enc.participantes) {
+    if (p.tipo !== 'pj' || p.ref !== pj.id) continue;
+    n++;
+    if (k === 'nombre') p.nombre = pj.nombre || p.nombre;
+    else if (k === 'nivel') { p.nivel = pj.nivel || 1; p.bc = bcDeNivel(pj.nivel); }
+    else if (k === 'ca') p.ca = pj.ca;
+    else if (k === 'des') p.desMod = modDe(pj.des);
+    else if (k === 'iniDes') p.ini.usarDes = pj.iniDes !== false;
+    else if (k === 'iniBC') p.ini.usarBC = !!pj.iniBC;
+    else if (k === 'iniExtra') p.ini.extra = pj.iniExtra || 0;
+    else if (k === 'pgMax') {
+      const nuevo = Math.max(1, pj.pgMax || 1);
+      p.pg = p.pg === p.pgMax ? nuevo : Math.min(p.pg, nuevo);
+      p.pgMax = nuevo;
+    } else n--;
+  }
+  if (n) guardar();
+}
 C.ajPantalla = el => { E.ajustes.pantalla = el.checked; guardar(); };
 C.importar = el => {
   const f = el.files && el.files[0]; if (!f) return;
