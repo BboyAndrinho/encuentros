@@ -1,0 +1,18 @@
+{
+  "name": "Encuentros D&D",
+  "short_name": "Encuentros",
+  "description": "Gestor de encuentros de combate para D&D 5.5e: iniciativa, turnos, puntos de golpe y estados.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#15120f",
+  "theme_color": "#1b1613",
+  "icons": [
+    { "src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "iconos/icono.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
