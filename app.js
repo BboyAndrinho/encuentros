@@ -49,6 +49,42 @@ for (const m of MONS) {
 const TIPOS = [...new Set(MONS.map(m => m.tipo))].sort((a, b) => a.localeCompare(b, 'es'));
 const VDS = [...new Set(MONS.map(m => m.vd))].sort((a, b) => vdNum(a) - vdNum(b));
 
+// Conjuros
+const CONJS = SRD.conjuros || [];
+const CONJ = new Map(CONJS.map(c => [c.id, c]));
+const CONJ_N = new Map(CONJS.map(c => [norm(c.nombre), c]));
+for (const c of CONJS) c._n = norm(c.nombre + ' ' + c.escuela);
+const CLASES_CONJ = [...new Set(CONJS.flatMap(c => c.clases))].sort((a, b) => a.localeCompare(b, 'es'));
+const ESCUELAS_CONJ = [...new Set(CONJS.map(c => c.escuela))].sort((a, b) => a.localeCompare(b, 'es'));
+const nivelTxt = n => n === 0 ? 'Truco' : `Nivel ${n}`;
+const ordenConj = (a, b) => a.nivel - b.nivel || a.nombre.localeCompare(b.nombre, 'es');
+// En el SRD los nombres de conjuros van en cursiva: los convertimos en enlaces para consultarlos
+function enlazarConjuros(html) {
+  return String(html || '').replace(/<em>([^<]+)<\/em>/g, (todo, t) => {
+    const c = CONJ_N.get(norm(t).trim().replace(/[.,;:]+$/, ''));
+    return c ? `<button class="enl-conj" data-a="verConjuro" data-id="${c.id}">${esc(t.trim())}</button>${/\s$/.test(t) ? ' ' : ''}` : todo;
+  });
+}
+
+// Lee de una acción de monstruo su ataque, su tirada de salvación y sus daños
+const CAR_CORTO = { Fuerza: 'Fue', Destreza: 'Des', Constitución: 'Con', Inteligencia: 'Int', Sabiduría: 'Sab', Carisma: 'Car' };
+const RE_DANO = /(\d+)(?: \(([^)]+)\))? de daño (?:de )?(ácido|contundente|cortante|frío|fuego|fuerza|necrótico|perforante|psíquico|radiante|relámpago|trueno|veneno)/gi;
+function analizarEntrada(e) {
+  if (e._an) return e._an;
+  const t = e.html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+  const at = t.match(/Tirada de ataque (cuerpo a cuerpo o a distancia|cuerpo a cuerpo|a distancia):\s*([+−-]\s*\d+)(?:,\s*alcance ([^.]+?))?\./);
+  const ts = t.match(/Tirada de salvación de (\S+):\s*CD (\d+)/);
+  const danos = [...t.matchAll(RE_DANO)].map(x => ({ media: +x[1], dados: x[2] || '', tipo: x[3].toLowerCase() }));
+  e._an = {
+    ataque: at && { tipo: at[1], bono: at[2].replace(/\s/g, '').replace('-', '−'), alcance: at[3] || '' },
+    ts: ts && { car: CAR_CORTO[ts[1]] || ts[1], cd: +ts[2] },
+    danos
+  };
+  return e._an;
+}
+// Estados que incluyen el de incapacitado (impiden, por ejemplo, el intercambio de la dote Alerta)
+const INCAPACITANTES = new Set(['incapacitado', 'aturdido', 'inconsciente', 'paralizado', 'petrificado']);
+
 // Presupuesto de PX por personaje (SRD 5.2.1, "Dificultad de los encuentros de combate")
 const PX_TABLA = {
   1: [50, 75, 100], 2: [100, 150, 200], 3: [150, 225, 400], 4: [250, 375, 500], 5: [500, 750, 1100],
@@ -138,7 +174,7 @@ function base(p) {
 }
 function participanteDePJ(pj) {
   return base({
-    tipo: 'pj', ref: pj.id, nombre: pj.nombre, nivel: pj.nivel || 1,
+    tipo: 'pj', ref: pj.id, nombre: pj.nombre, nivel: pj.nivel || 1, alerta: !!pj.alerta,
     ca: pj.ca, pgMax: pj.pgMax || 1, pg: pj.pgMax || 1,
     desMod: modDe(pj.des), bc: bcDeNivel(pj.nivel),
     ini: { tirada: null, usarDes: pj.iniDes !== false, usarBC: !!pj.iniBC, extra: pj.iniExtra || 0, manual: null }
@@ -396,7 +432,10 @@ function abrirHoja(render, opts = {}) {
     if (html == null) { h.cerrar(); return; }
     const sc = d.scrollTop;
     const t = $('#toast', d); if (t) document.body.appendChild(t);
+    // Recordar qué secciones plegables estaban abiertas o cerradas
+    const plegables = new Map($$('details[data-k]', d).map(x => [x.dataset.k, x.open]));
     d.innerHTML = `<div class="hoja-asa"></div><div class="hoja-in">${html}</div>`;
+    for (const x of $$('details[data-k]', d)) if (plegables.has(x.dataset.k)) x.open = plegables.get(x.dataset.k);
     d.scrollTop = sc;
     opts.alPintar && opts.alPintar(h);
   };
@@ -495,7 +534,7 @@ function ruta() {
   const partes = (location.hash || '#/encuentros').slice(2).split('/');
   return { v: decodeURIComponent(partes[0] || 'encuentros'), id: partes[1] ? decodeURIComponent(partes[1]) : null };
 }
-const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', estados: 'estados' };
+const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', conjuros: 'conjuros', conjuro: 'conjuros', estados: 'estados' };
 let ultimaRuta = '', desplazarAlTurno = false, modoReordenar = false;
 function render() {
   const r = ruta();
@@ -556,8 +595,10 @@ function filaPrep(p) {
       <button class="chip ${p.ini.usarDes ? 'on' : ''}" data-a="togDes" data-pid="${p.id}">Des ${signo(p.desMod)}</button>
       <button class="chip ${p.ini.usarBC ? 'on' : ''}" data-a="togBC" data-pid="${p.id}">BC ${signo(p.bc)}</button>
       ${p.ini.extra ? `<span class="chip fijo">Otros ${signo(p.ini.extra)}</span>` : ''}
+      ${p.alerta ? `<button class="chip alerta" data-a="intercambiar" data-pid="${p.id}" aria-label="Intercambiar iniciativa (dote Alerta)">⇄ Alerta</button>` : ''}
       <button class="ini-total ${p.ini.manual != null ? 'manual' : ''}" data-a="iniManual" data-pid="${p.id}" data-total="${p.id}">${t ?? '—'}</button>
     </div>
+    ${p.ini.cambio && p.ini.manual != null ? `<p class="nota-cambio">⇄ Iniciativa intercambiada con ${esc(p.ini.cambio)}</p>` : ''}
   </div>`;
 }
 
@@ -669,9 +710,14 @@ VISTAS.personaje = id => {
     <p class="nota" id="pj-calc">Mod. de Destreza ${signo(modDe(pj.des))} · Bonificador por competencia ${signo(bcDeNivel(pj.nivel))}</p>
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 4px">Cómo se calcula su iniciativa</h2>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniDes" ${pj.iniDes !== false ? 'checked' : ''}> Sumar el modificador de Destreza</label>
-      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniBC" ${pj.iniBC ? 'checked' : ''}> Sumar el bonificador por competencia (dote Alerta, etc.)</label>
+      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="alerta" ${pj.alerta ? 'checked' : ''}> Tiene la dote <b>Alerta</b> (suma su BC y puede intercambiar la iniciativa con un aliado)</label>
+      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniBC" ${pj.iniBC ? 'checked' : ''}> Sumar el bonificador por competencia</label>
       ${campo('iniExtra', 'Otros bonificadores a la iniciativa', 'number', 'placeholder="0"')}
       <p class="nota" id="pj-ini">${esc(resumenIniPJ(pj))}</p>
+    </section>
+    <section class="bloque">
+      <div class="bloque-cab"><h2>Conjuros <span class="cuenta">${(pj.conjuros || []).length}</span></h2><button class="btn peq" data-a="elegirConjuros" data-id="${pj.id}">${ic(IC.mas)} Añadir</button></div>
+      <div id="pj-conjuros">${htmlListaConjPJ(pj)}</div>
     </section>
     ${campo('pasiva', 'Percepción pasiva (opcional)', 'number')}
     <label class="campo"><span>Notas</span><textarea data-in="pj" data-k="notas" rows="3">${esc(pj.notas || '')}</textarea></label>
@@ -716,7 +762,7 @@ function htmlPerfil(m) {
   const otros = Object.keys(c).filter(k => !['Velocidad', 'Habilidades', 'Vulnerabilidades', 'Resistencias', 'Inmunidades', 'Equipo', 'Sentidos', 'Idiomas'].includes(k))
     .map(k => `<p><b>${esc(k)}:</b> ${c[k]}</p>`).join('');
   const cars = m.car.map((x, i) => `<div class="car"><b>${CARS[i]}</b><span class="v">${x.v}</span><span>${signo(x.mod)}</span><span class="salv">${signo(x.salv)}</span></div>`).join('');
-  const secs = m.secciones.map(s => `<h4>${esc(s.titulo)}</h4>${s.intro ? `<p class="p-intro">${s.intro}</p>` : ''}${s.entradas.map(e => `<p><b><i>${esc(e.nombre)}.</i></b> ${e.html}</p>`).join('')}`).join('');
+  const secs = m.secciones.map(s => `<h4>${esc(s.titulo)}</h4>${s.intro ? `<p class="p-intro">${enlazarConjuros(s.intro)}</p>` : ''}${s.entradas.map(e => `<p><b><i>${esc(e.nombre)}.</i></b> ${enlazarConjuros(e.html)}</p>`).join('')}`).join('');
   return `<div class="perfil">
     <p class="p-tipo">${esc(m.tipo)} ${esc(m.tamano)}${m.alineamiento ? ', ' + esc(m.alineamiento) : ''}</p>
     <div class="p-linea"></div>
@@ -748,6 +794,126 @@ VISTAS.estados = () => ({
   ${SRD.estados.map(e => `<details class="regla"><summary>${esc(e.nombre)}</summary><div class="cuerpo">${e.html}</div></details>`).join('')}`
 });
 
+// ---- Conjuros ----
+const FC = { q: '', nivel: '', clase: '', escuela: '' }; // pestaña Conjuros
+const FP = { q: '', nivel: '', clase: '', escuela: '' }; // selector de conjuros de un personaje
+function filtrarConjs(f) {
+  const palabras = norm(f.q).trim().split(/\s+/).filter(Boolean);
+  return CONJS.filter(c =>
+    (f.nivel === '' || c.nivel === +f.nivel) &&
+    (!f.clase || c.clases.includes(f.clase)) &&
+    (!f.escuela || c.escuela === f.escuela) &&
+    palabras.every(w => c._n.includes(w))
+  ).sort(ordenConj);
+}
+function htmlFiltrosConj(f, clave, fija) {
+  const sel = (k, opts, vacio) => `<select data-in="${clave}" data-k="${k}"><option value="">${vacio}</option>${opts.map(([v, t]) => `<option value="${esc(v)}" ${String(f[k]) === String(v) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+  return `<div class="buscador"${fija ? ' style="position:static"' : ''}>
+    <input type="search" data-in="${clave}" data-k="q" value="${esc(f.q)}" placeholder="Buscar conjuro…" autocomplete="off">
+    <div class="filtros">
+      ${sel('nivel', [['0', 'Trucos'], ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => [String(n), 'Nivel ' + n])], 'Cualquier nivel')}
+      ${sel('clase', CLASES_CONJ.map(c => [c, c.charAt(0).toUpperCase() + c.slice(1)]), 'Cualquier clase')}
+      ${sel('escuela', ESCUELAS_CONJ.map(e => [e, e]), 'Cualquier escuela')}
+    </div>
+  </div>`;
+}
+const etiquetasConj = c => `${c.concentracion ? '<span class="etq">C</span>' : ''}${c.ritual ? '<span class="etq">R</span>' : ''}`;
+function htmlResultadosConj(f) {
+  const r = filtrarConjs(f);
+  return `<p class="resumen">${r.length} conjuro${r.length === 1 ? '' : 's'} · <span class="etq">C</span> concentración · <span class="etq">R</span> ritual</p>
+  ${r.length ? `<div class="lista">${r.map(c => `<a class="fila" href="#/conjuro/${c.id}"><div class="f-txt"><div class="f-tit">${esc(c.nombre)} ${etiquetasConj(c)}</div><div class="f-sub">${esc(c.escuela)} · ${esc(c.tiempo)} · ${esc(c.alcance)}</div></div><div class="f-vd">${nivelTxt(c.nivel)}</div></a>`).join('')}</div>` : `<p class="vacio">No hay resultados.</p>`}`;
+}
+function htmlConjuro(c) {
+  return `<div class="perfil conjuro">
+    <p class="p-tipo">${esc(c.tipo)}</p>
+    <div class="p-linea"></div>
+    <p><b>Tiempo de lanzamiento:</b> ${esc(c.tiempo)}</p>
+    <p><b>Alcance:</b> ${esc(c.alcance)}</p>
+    <p><b>Componentes:</b> ${esc(c.componentes)}</p>
+    <p><b>Duración:</b> ${esc(c.duracion)}</p>
+    <div class="p-linea"></div>
+    <div class="regla-txt">${enlazarConjuros(c.html)}</div>
+  </div>`;
+}
+VISTAS.conjuros = () => ({
+  titulo: 'Conjuros', html: `${htmlFiltrosConj(FC, 'fc')}<div id="res-fc">${htmlResultadosConj(FC)}</div>`
+});
+VISTAS.conjuro = id => {
+  const c = CONJ.get(id); if (!c) return null;
+  return {
+    titulo: c.nombre, atras: '#/conjuros', html: htmlConjuro(c),
+    pie: `<button class="btn primario grande" data-a="conjAPJ" data-id="${c.id}">${ic(IC.mas)} Añadir a un personaje</button>`
+  };
+};
+function hojaConjuro(id) {
+  const c = CONJ.get(id); if (!c) return;
+  abrirHoja(() => `<div class="hp-cab"><div><h3>${esc(c.nombre)}</h3><div class="sub">${nivelTxt(c.nivel)} · ${esc(c.escuela)}</div></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>${htmlConjuro(c)}`, { fija: true });
+}
+// Añadir un conjuro (desde su ficha) a uno o varios personajes
+function hojaConjAPJ(cid) {
+  const c = CONJ.get(cid); if (!c) return;
+  const lista = E.personajes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  abrirHoja(() => `<div class="hp-cab"><div><h3>¿Quién conoce ${esc(c.nombre)}?</h3><div class="sub">Toca para añadirlo o quitarlo.</div></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
+    ${lista.length ? `<div class="chips">${lista.map(pj => `<button class="chip ${(pj.conjuros || []).includes(c.id) ? 'on' : ''}" data-a="togConjPJ" data-pj="${pj.id}" data-id="${c.id}">${esc(pj.nombre)}</button>`).join('')}</div>`
+      : `<p class="vacio">No tienes personajes guardados.</p>`}`);
+}
+// Elegir los conjuros de un personaje (desde su perfil)
+function hojaElegirConjuros(pjId) {
+  const pj = pjPorId(pjId); if (!pj) return;
+  // Empezar filtrando por su clase (vale "maga", "bruja", "paladina"…)
+  const palabras = norm(pj.clase).split(/\s+/);
+  const cl = CLASES_CONJ.find(k => { const raiz = norm(k).replace(/[oa]$/, ''); return palabras.some(w => w.startsWith(raiz)); });
+  Object.assign(FP, { q: '', nivel: '', escuela: '', clase: cl || '' });
+  const h = abrirHoja(() => `<div class="hp-cab"><div><h3>Conjuros de ${esc(pj.nombre)}</h3><div class="sub">Toca un conjuro para añadirlo o quitarlo.</div></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
+    ${htmlFiltrosConj(FP, 'fp', true)}<div id="res-fp">${htmlElegirConj(pj)}</div>`, { fija: true });
+  h.pjId = pjId;
+}
+function htmlElegirConj(pj) {
+  const tiene = new Set(pj.conjuros || []);
+  const r = filtrarConjs(FP).slice(0, 120);
+  return `<p class="resumen">${(pj.conjuros || []).length} elegidos</p>
+  ${r.length ? `<div class="lista">${r.map(c => `<div class="fila"><button class="marca-conj ${tiene.has(c.id) ? 'on' : ''}" data-a="togConjPJ" data-pj="${pj.id}" data-id="${c.id}" aria-label="${tiene.has(c.id) ? 'Quitar' : 'Añadir'} ${esc(c.nombre)}">${tiene.has(c.id) ? '✓' : '+'}</button>
+    <div class="f-txt" data-a="verConjuro" data-id="${c.id}"><div class="f-tit">${esc(c.nombre)} ${etiquetasConj(c)}</div><div class="f-sub">${nivelTxt(c.nivel)} · ${esc(c.escuela)}</div></div></div>`).join('')}</div>` : `<p class="vacio">No hay resultados.</p>`}`;
+}
+function htmlListaConjPJ(pj) {
+  const lista = (pj.conjuros || []).map(id => CONJ.get(id)).filter(Boolean).sort(ordenConj);
+  if (!lista.length) return `<p class="nota">Sin conjuros. Añádelos para consultarlos rápido durante el combate.</p>`;
+  return `<div class="lista">${lista.map(c => `<div class="fila"><div class="f-txt" data-a="verConjuro" data-id="${c.id}"><div class="f-tit">${esc(c.nombre)} ${etiquetasConj(c)}</div><div class="f-sub">${nivelTxt(c.nivel)} · ${esc(c.escuela)}</div></div>
+    <button class="icono peq" data-a="togConjPJ" data-pj="${pj.id}" data-id="${c.id}" aria-label="Quitar ${esc(c.nombre)}">${ic(IC.cerrar)}</button></div>`).join('')}</div>`;
+}
+
+// ---- Intercambio de iniciativa (dote Alerta) ----
+const incapacitado = p => p.pg === 0 || p.estados.some(s => INCAPACITANTES.has(s.id));
+function hojaIntercambio(pid) {
+  const enc = encActual(); const a = partPorId(enc, pid); if (!a) return;
+  const h = abrirHoja(() => {
+    const ta = totalIni(a);
+    const cands = enc.participantes.filter(p => p.id !== a.id && (p.tipo === 'pj' || p.aliado) && !p.derrotado);
+    const filas = cands.map(b => {
+      const tb = totalIni(b);
+      const motivo = tb == null ? 'sin iniciativa' : incapacitado(b) ? 'incapacitado' : '';
+      return `<button class="fila" data-a="intercambiarCon" data-pid="${b.id}" ${motivo || ta == null || incapacitado(a) ? 'disabled' : ''}>
+        <div class="f-txt"><div class="f-tit">${esc(b.nombre)}</div><div class="f-sub">${motivo ? esc(motivo) : `Quedaría ${esc(a.nombre)} con ${tb} y ${esc(b.nombre)} con ${ta}`}</div></div>
+        <div class="f-vd">Ini ${tb ?? '—'}</div></button>`;
+    }).join('');
+    return `<div class="hp-cab"><div><h3>⇄ Intercambiar iniciativa</h3><div class="sub">${esc(a.nombre)} tiene la dote Alerta (iniciativa ${ta ?? '—'}). Puede cambiarla con un aliado voluntario.</div></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
+      ${ta == null ? '<p class="aviso">Escribe primero su tirada de iniciativa.</p>' : incapacitado(a) ? '<p class="aviso">No puede: está incapacitado.</p>' : ''}
+      ${cands.length ? `<div class="lista">${filas}</div>` : '<p class="vacio">No hay aliados en el encuentro.</p>'}`;
+  }, { fija: true });
+  h.pidA = pid;
+}
+function intercambiarIni(enc, a, b) {
+  const ta = totalIni(a), tb = totalIni(b);
+  a.ini.manual = tb; b.ini.manual = ta;
+  a.ini.cambio = b.nombre; b.ini.cambio = a.nombre;
+  if (enc.combate) {
+    const o = enc.combate.orden; const i = o.indexOf(a.id), j = o.indexOf(b.id);
+    if (i >= 0 && j >= 0) [o[i], o[j]] = [o[j], o[i]];
+    registrar(enc, `${a.nombre} intercambia la iniciativa con ${b.nombre} (${ta} ↔ ${tb})`);
+  }
+  return [ta, tb];
+}
+
 VISTAS.ajustes = () => ({
   titulo: 'Ajustes', atras: '#/encuentros',
   html: `
@@ -772,6 +938,45 @@ VISTAS.ajustes = () => ({
 });
 
 // ============ Hojas concretas ============
+// ---- Lo que necesita el máster de un enemigo en pleno combate ----
+function filaAccion(e, k) {
+  const a = analizarEntrada(e);
+  const chips = [];
+  if (a.ataque) {
+    const tipo = a.ataque.tipo === 'cuerpo a cuerpo' ? 'Cuerpo a cuerpo' : a.ataque.tipo === 'a distancia' ? 'A distancia' : 'CaC o distancia';
+    chips.push(`<span class="ach at">${esc(a.ataque.bono)} · ${tipo}${a.ataque.alcance ? ' · ' + esc(a.ataque.alcance) : ''}</span>`);
+  }
+  if (a.ts) chips.push(`<span class="ach ts">TS ${esc(a.ts.car)} CD ${a.ts.cd}</span>`);
+  for (const d of a.danos) chips.push(`<span class="ach dano">${d.media}${d.dados ? ` (${esc(d.dados)})` : ''} ${esc(d.tipo)}</span>`);
+  const nConj = new Set([...e.html.matchAll(/<em>([^<]+)<\/em>/g)].map(x => CONJ_N.get(norm(x[1]).trim().replace(/[.,;:]+$/, ''))).filter(Boolean)).size;
+  if (nConj) chips.push(`<span class="ach conj">${nConj} conjuro${nConj === 1 ? '' : 's'}</span>`);
+  return `<details class="accion" data-k="acc-${k}"><summary><span class="acc-nom">${esc(e.nombre)}</span>${chips.length ? `<span class="acc-chips">${chips.join('')}</span>` : ''}</summary>
+    <div class="acc-txt"><p>${enlazarConjuros(e.html)}</p></div></details>`;
+}
+function htmlCombateMonstruo(m) {
+  const salv = m.car.map((x, i) => `<span class="salv-chip${x.salv !== x.mod ? ' comp' : ''}"><b>${CARS[i]}</b>${signo(x.salv)}</span>`).join('');
+  const limpio = s => String(s || '').replace(/<[^>]+>/g, '');
+  const defensas = [['Vulnerable', m.campos.Vulnerabilidades], ['Resiste', m.campos.Resistencias], ['Inmune', m.campos.Inmunidades]]
+    .filter(([, v]) => v).map(([k, v]) => `<p class="defensa"><b>${k}:</b> ${esc(limpio(v))}</p>`).join('');
+  const secciones = m.secciones.map((s, si) => `<details class="sec-mon" data-k="sec-${si}"${s.titulo === 'Acciones' ? ' open' : ''}>
+    <summary>${esc(s.titulo)} <span class="cuenta">${s.entradas.length}</span></summary>
+    ${s.intro ? `<p class="p-intro">${enlazarConjuros(s.intro)}</p>` : ''}
+    ${s.entradas.map((e, ei) => filaAccion(e, `${si}-${ei}`)).join('')}</details>`).join('');
+  return `<div class="hp-sec panel-mon">
+    <div class="salvs" aria-label="Tiradas de salvación"><span class="salv-tit">Salvaciones</span>${salv}</div>
+    ${m.campos.Velocidad ? `<p class="defensa"><b>Velocidad:</b> ${esc(limpio(m.campos.Velocidad))}</p>` : ''}
+    ${defensas}
+    ${secciones}
+  </div>`;
+}
+function htmlConjurosPJ(pj) {
+  const ids = (pj && pj.conjuros) || [];
+  const lista = ids.map(id => CONJ.get(id)).filter(Boolean).sort(ordenConj);
+  if (!lista.length) return '';
+  return `<details class="sec-mon" data-k="conj-pj" open><summary>Conjuros <span class="cuenta">${lista.length}</span></summary>
+    <div class="chips conj-chips">${lista.map(c => `<button class="chip conj" data-a="verConjuro" data-id="${c.id}"><small>${c.nivel === 0 ? 'T' : c.nivel}</small>${esc(c.nombre)}${c.concentracion ? ' <em>C</em>' : ''}</button>`).join('')}</div></details>`;
+}
+
 function hojaParticipante(pid) {
   const encId = ruta().id;
   abrirHoja(() => {
@@ -805,6 +1010,8 @@ function hojaParticipante(pid) {
       <button class="btn" data-a="pgAccion" data-q="temp" data-pid="${p.id}">Temp.</button>
     </div>
     ${muerte}
+    ${m ? htmlCombateMonstruo(m) : ''}
+    ${p.tipo === 'pj' ? htmlConjurosPJ(pjPorId(p.ref)) : ''}
     <div class="hp-sec"><div class="bloque-cab"><h4>Estados</h4><button class="btn peq" data-a="anadirEstado" data-pid="${p.id}">${ic(IC.mas)} Estado</button></div>
       ${filasEst || '<p class="nota">Sin estados.</p>'}</div>
     <div class="toggles">
@@ -814,7 +1021,8 @@ function hojaParticipante(pid) {
     </div>
     <label class="campo"><span>Notas</span><textarea data-in="partNotas" data-pid="${p.id}" rows="2" placeholder="Apuntes rápidos…">${esc(p.notas || '')}</textarea></label>
     <div class="botonera">
-      ${m ? `<button class="btn peq" data-a="verPerfil" data-id="${m.id}">Ver perfil</button>` : ''}
+      ${m ? `<button class="btn peq" data-a="verPerfil" data-id="${m.id}">Ver perfil completo</button>` : ''}
+      ${p.alerta ? `<button class="btn peq" data-a="intercambiar" data-pid="${p.id}">⇄ Intercambiar iniciativa</button>` : ''}
       <button class="btn peq" data-a="editarPart" data-pid="${p.id}">Editar</button>
       ${p.tipo !== 'pj' ? `<button class="btn peq" data-a="togDerrotado" data-pid="${p.id}">${p.derrotado ? 'Devolver al combate' : 'Marcar derrotado'}</button>` : ''}
       <button class="btn peq peligro-suave" data-a="quitarPart" data-pid="${p.id}">Quitar</button>
@@ -1131,13 +1339,13 @@ A.editarOk = () => {
   if (enc.combate) accionCombate(enc, hacer); else { hacer(); guardar(); refrescar(); }
   h.cerrar();
 };
-A.togDes = el => { const p = partPorId(encActual(), el.dataset.pid); if (!p) return; p.ini.usarDes = !p.ini.usarDes; p.ini.manual = null; guardar(); refrescar(); };
-A.togBC = el => { const p = partPorId(encActual(), el.dataset.pid); if (!p) return; p.ini.usarBC = !p.ini.usarBC; p.ini.manual = null; guardar(); refrescar(); };
+A.togDes = el => { const p = partPorId(encActual(), el.dataset.pid); if (!p) return; p.ini.usarDes = !p.ini.usarDes; p.ini.manual = null; p.ini.cambio = null; guardar(); refrescar(); };
+A.togBC = el => { const p = partPorId(encActual(), el.dataset.pid); if (!p) return; p.ini.usarBC = !p.ini.usarBC; p.ini.manual = null; p.ini.cambio = null; guardar(); refrescar(); };
 A.iniManual = async el => {
   const enc = encActual(); const p = partPorId(enc, el.dataset.pid); if (!p) return;
   const r = await pedirNumero(`Iniciativa de ${esc(p.nombre)}`, totalIni(p), { textoVaciar: p.ini.manual != null ? 'Volver a calcularla' : null, ayuda: 'Escribe el total que quieras. Se mantendrá aunque cambies la tirada.' });
   if (r === undefined) return;
-  p.ini.manual = r; guardar(); refrescar();
+  p.ini.manual = r; p.ini.cambio = null; guardar(); refrescar();
 };
 A.iniFija = () => {
   const enc = encActual(); if (!enc) return;
@@ -1280,6 +1488,34 @@ A.estNivel = el => {
 };
 A.verEstado = el => hojaReglaEstado(el.dataset.id);
 A.verPerfil = el => hojaPerfil(el.dataset.id);
+A.verConjuro = el => hojaConjuro(el.dataset.id);
+A.conjAPJ = el => hojaConjAPJ(el.dataset.id);
+A.elegirConjuros = el => hojaElegirConjuros(el.dataset.id);
+A.togConjPJ = el => {
+  const pj = pjPorId(el.dataset.pj); const id = el.dataset.id; if (!pj || !CONJ.has(id)) return;
+  pj.conjuros ||= [];
+  const i = pj.conjuros.indexOf(id);
+  if (i >= 0) pj.conjuros.splice(i, 1); else pj.conjuros.push(id);
+  guardar();
+  const tiene = i < 0;
+  // Actualizar lo que se ve sin redibujar las ventanas (para no perder la búsqueda escrita)
+  const h = hojaActual();
+  if (h && h.pjId) { const r = $('#res-fp', h.el); if (r) r.innerHTML = htmlElegirConj(pj); }
+  else if (el.classList.contains('chip')) el.classList.toggle('on', tiene);
+  const lista = $('#pj-conjuros'); if (lista && ruta().id === pj.id) lista.innerHTML = htmlListaConjPJ(pj);
+  const cuenta = lista && lista.closest('.bloque').querySelector('.cuenta'); if (cuenta) cuenta.textContent = pj.conjuros.length;
+  toast(`${CONJ.get(id).nombre}: ${tiene ? 'añadido a' : 'quitado de'} ${pj.nombre}`);
+};
+A.intercambiar = el => hojaIntercambio(el.dataset.pid);
+A.intercambiarCon = el => {
+  const h = hojaActual(); const enc = encActual(); if (!h || !enc) return;
+  const a = partPorId(enc, h.pidA), b = partPorId(enc, el.dataset.pid); if (!a || !b) return;
+  let res;
+  if (enc.combate) accionCombate(enc, () => { res = intercambiarIni(enc, a, b); });
+  else { res = intercambiarIni(enc, a, b); guardar(); refrescar(); }
+  h.cerrar();
+  toast(`${a.nombre} ahora tiene ${res[1]} y ${b.nombre} tiene ${res[0]}`);
+};
 A.togConc = el => {
   const enc = encActual(); const p = partPorId(enc, el.dataset.pid); if (!p) return;
   accionCombate(enc, () => { p.conc = !p.conc; registrar(enc, `${p.nombre} ${p.conc ? 'empieza a concentrarse' : 'deja de concentrarse'}`); });
@@ -1418,6 +1654,7 @@ I.tirada = el => {
   p.ini.tirada = num(el.value); p.ini.manual = null; guardar();
   const t = $(`[data-total="${p.id}"]`);
   if (t) { t.textContent = totalIni(p) ?? '—'; t.classList.remove('manual'); }
+  if (p.ini.cambio) { p.ini.cambio = null; guardar(); const n = t && t.closest('.fila-prep').querySelector('.nota-cambio'); if (n) n.remove(); }
 };
 I.tiradaNuevo = el => { const p = nuevoDeHoja(el.dataset.pid); if (!p) return; p.ini.tirada = num(el.value); actTotalNuevo(p); };
 I.partNotas = el => { const enc = encActual(); const p = partPorId(enc, el.dataset.pid); if (!p) return; p.notas = el.value; guardar(); };
@@ -1433,6 +1670,12 @@ I.pj = el => {
 };
 I.fb = el => { FB[el.dataset.k] = el.value; actualizarResultados('fb'); };
 I.fa = el => { FA[el.dataset.k] = el.value; actualizarResultados('fa'); };
+I.fc = el => { FC[el.dataset.k] = el.value; const r = $('#res-fc'); if (r) r.innerHTML = htmlResultadosConj(FC); };
+I.fp = el => {
+  FP[el.dataset.k] = el.value;
+  const h = hojaActual(); const pj = h && pjPorId(h.pjId); const r = h && $('#res-fp', h.el);
+  if (r && pj) r.innerHTML = htmlElegirConj(pj);
+};
 function actualizarResultados(clave) {
   if (clave === 'fb') { const r = $('#res-fb'); if (r) r.innerHTML = htmlResultadosBest(FB); }
   else { const h = hojaActual(); const r = h && $('#res-fa', h.el); if (r) r.innerHTML = htmlResultadosAnadir(); }
@@ -1440,9 +1683,17 @@ function actualizarResultados(clave) {
 const C = {};
 C.pjchk = el => {
   const pj = pjPorId(ruta().id); if (!pj) return;
-  pj[el.dataset.k] = el.checked; guardar();
+  const k = el.dataset.k;
+  pj[k] = el.checked;
+  // La dote Alerta suma el bonificador por competencia a la iniciativa
+  if (k === 'alerta' && el.checked && !pj.iniBC) {
+    pj.iniBC = true;
+    const bc = $('[data-ch="pjchk"][data-k="iniBC"]'); if (bc) bc.checked = true;
+    sincronizarPJ(pj, 'iniBC');
+  }
+  guardar();
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
-  sincronizarPJ(pj, el.dataset.k);
+  sincronizarPJ(pj, k);
 };
 // Al terminar de escribir un campo del perfil (al salir de la casilla)
 C.pjSync = el => {
@@ -1463,6 +1714,7 @@ function sincronizarPJ(pj, k) {
     else if (k === 'iniDes') p.ini.usarDes = pj.iniDes !== false;
     else if (k === 'iniBC') p.ini.usarBC = !!pj.iniBC;
     else if (k === 'iniExtra') p.ini.extra = pj.iniExtra || 0;
+    else if (k === 'alerta') p.alerta = !!pj.alerta;
     else if (k === 'pgMax') {
       const nuevo = Math.max(1, pj.pgMax || 1);
       p.pg = p.pg === p.pgMax ? nuevo : Math.min(p.pg, nuevo);
