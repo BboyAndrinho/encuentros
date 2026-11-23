@@ -461,6 +461,22 @@ details.regla[open] summary::after { content: "−"; }
 details.regla .cuerpo { padding: 0 16px 12px; }
 .cuerpo p, .regla-txt p { margin: 6px 0; }
 
+/* Tablas, listas y recuadros dentro de los textos del SRD */
+.srd-tabla-tit { margin: 12px 0 4px !important; }
+.srd-tabla-caja { overflow-x: auto; margin: 4px 0 10px; border: 1px solid var(--borde); border-radius: 10px; }
+.srd-tabla { width: 100%; border-collapse: collapse; font-size: .86rem; line-height: 1.35; }
+.srd-tabla th { text-align: left; font-size: .74rem; color: var(--suave); font-weight: 700; padding: 6px 5px; vertical-align: bottom; background: var(--fondo); }
+.srd-tabla th:first-child, .srd-tabla td:first-child { padding-left: 8px; }
+.srd-tabla td { padding: 6px 5px; border-top: 1px solid var(--borde); vertical-align: top; }
+.srd-tabla td:first-child { font-weight: 600; }
+.srd-cars { text-align: center; }
+.srd-cars th, .srd-cars td { text-align: center; padding: 4px 3px; }
+.srd-cars tbody th { font-size: .84rem; color: inherit; background: none; border-top: 1px solid var(--borde); white-space: nowrap; }
+.srd-cars td:first-child { font-weight: inherit; }
+.srd-recuadro { margin: 12px 0; padding: 4px 12px; border-left: 3px solid var(--acento); background: var(--fondo); border-radius: 0 10px 10px 0; }
+.cuerpo ul, .regla-txt ul, .wz-det ul, .wz-op-det ul, .acc-txt ul { margin: 6px 0; padding-left: 20px; }
+.cuerpo li, .regla-txt li, .wz-det li, .wz-op-det li, .acc-txt li { margin: 3px 0; }
+
 /* ===== Aviso de versión nueva ===== */
 #actualizacion {
   position: fixed; z-index: 30; left: 12px; right: 12px; top: calc(64px + env(safe-area-inset-top));

@@ -2910,7 +2910,8 @@ A.crearPJ = async () => {
     if (!r) return;
     if (r === 'nuevo') E.borradorPJ = wzNuevo();
   } else E.borradorPJ = wzNuevo();
-  guardar(); navegar('#/crear');
+  guardar();
+  if (location.hash === '#/crear') render(); else navegar('#/crear');
 };
 A.wzSet = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v;
