@@ -542,3 +542,8 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .marca-conj:disabled { opacity: .35; cursor: default; }
 span.marca-conj { display: inline-grid; place-items: center; }
 .wz-grupo-herr { margin: 10px 0 4px; font-size: .78rem; font-weight: 700; color: var(--suave); text-transform: uppercase; letter-spacing: .03em; }
+small.nv { font-weight: 600; font-size: .72rem; color: var(--suave); margin-left: 6px; }
+details.regla summary small.nv { align-self: center; }
+.wz-pg { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--superficie2); font-size: .92rem; }
+.wz-op:disabled { opacity: .45; cursor: default; }
+.wz-bonus > span { width: auto; min-width: 44px; white-space: nowrap; }

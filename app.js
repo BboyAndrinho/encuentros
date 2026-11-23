@@ -27,6 +27,7 @@ const CARS_PJ = [['fue', 'Fuerza'], ['des', 'Destreza'], ['con', 'Constitución'
 const IC = {
   atras: '<path d="M15 18l-6-6 6-6"/>',
   mas: '<path d="M12 5v14M5 12h14"/>',
+  editar: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/>',
   puntos: '<circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/>',
   deshacer: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/>',
   cerrar: '<path d="M18 6L6 18M6 6l12 12"/>',
@@ -689,7 +690,7 @@ function ruta() {
   const partes = (location.hash || '#/encuentros').slice(2).split('/');
   return { v: decodeURIComponent(partes[0] || 'encuentros'), id: partes[1] ? decodeURIComponent(partes[1]) : null };
 }
-const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', crear: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', conjuros: 'conjuros', conjuro: 'conjuros', estados: 'estados' };
+const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', crear: 'personajes', hoja: 'personajes', subir: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', conjuros: 'conjuros', conjuro: 'conjuros', estados: 'estados' };
 let ultimaRuta = '', desplazarAlTurno = false, modoReordenar = false;
 function render() {
   const r = ruta();
@@ -840,7 +841,7 @@ VISTAS.personajes = () => {
   const lista = E.personajes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const html = `<button class="btn primario ancho" data-a="crearPJ">${ic(IC.mas)} ${E.borradorPJ && (E.borradorPJ.clase || E.borradorPJ.paso) ? 'Seguir creando personaje' : 'Crear personaje paso a paso'}</button>
   <button class="btn ancho peq" data-a="nuevoPJ" style="margin-top:0">Perfil rápido (solo datos de combate)</button>
-  ${lista.length ? `<div class="lista">${lista.map(pj => `<a class="fila" href="#/personaje/${pj.id}"><div class="f-txt"><div class="f-tit">${esc(pj.nombre)}</div>
+  ${lista.length ? `<div class="lista">${lista.map(pj => `<a class="fila" href="#/${clasePJ(pj) ? 'hoja' : 'personaje'}/${pj.id}"><div class="f-txt"><div class="f-tit">${esc(pj.nombre)}</div>
     <div class="f-sub">${esc([pj.clase, 'nivel ' + (pj.nivel || 1), pj.jugador && 'jugado por ' + pj.jugador].filter(Boolean).join(' · '))}</div></div>
     <div class="f-vd">CA ${pj.ca ?? '—'} · PG ${pj.pgMax ?? '—'}</div></a>`).join('')}</div>`
     : `<p class="vacio">Crea un perfil para cada jugador de tu mesa.<br>Luego podrás añadirlos a cualquier encuentro.</p>`}
@@ -862,6 +863,7 @@ VISTAS.personaje = id => {
   const pj = pjPorId(id); if (!pj) return null;
   const campo = (k, etiqueta, tipo = 'text', extra = '') => `<label class="campo"><span>${etiqueta}</span><input data-in="pj" data-ch="pjSync" data-k="${k}" type="${tipo}" ${tipo === 'number' ? 'inputmode="numeric"' : ''} value="${esc(pj[k] ?? '')}" ${extra}></label>`;
   const html = `
+    ${clasePJ(pj) ? `<a class="btn primario ancho" href="#/hoja/${pj.id}">Ver hoja completa y subir de nivel</a>` : ''}
     ${campo('nombre', 'Nombre del personaje')}
     ${campo('jugador', 'Jugador (opcional)')}
     <div class="fila2">${campo('clase', 'Clase y especie', 'text', 'placeholder="p. ej. Pícaro elfo"')}${campo('nivel', 'Nivel', 'number', 'min="1" max="20"')}</div>
@@ -889,7 +891,7 @@ VISTAS.personaje = id => {
     ${campo('pasiva', 'Percepción pasiva (opcional)', 'number')}
     <label class="campo"><span>Notas</span><textarea data-in="pj" data-k="notas" rows="3">${esc(pj.notas || '')}</textarea></label>
     <button class="btn ancho peligro-suave" data-a="borrarPJ" data-id="${pj.id}">Borrar personaje</button>`;
-  return { titulo: pj.nombre || 'Personaje', atras: '#/personajes', html };
+  return { titulo: pj.nombre || 'Personaje', atras: clasePJ(pj) ? '#/hoja/' + pj.id : '#/personajes', html };
 };
 
 // ---- Bestiario ----
@@ -2188,8 +2190,10 @@ const wzNuevo = () => ({
   especie: null, linaje: null, tamano: null, aptitud: null, habEspecie: null, doteHumano: null, habDote: [],
   tiradas: ['', '', '', '', '', ''], orden: null, modoBonus: '21', bonus2: null, bonus1: null,
   alineamiento: null, nombre: '', jugador: '', descripcion: '', personalidad: '', idiomas: [],
-  conj: {}, magia: {}, pericia: [], herrClase: [], herrTras: [], herrDote: []
+  conj: {}, magia: {}, pericia: [], herrClase: [], herrTras: [], herrDote: [], estilo: null
 });
+// Estilo de combate de nivel 1 (guerrero)
+const wzEstilo1 = () => { const c = CR && E.borradorPJ && wzClase(); return !!c && c.rasgos.some(r => r.nivel === 1 && r.nombre === 'Estilo de combate'); };
 // ---- Herramientas (SRD 5.2.1, capítulo «Equipo») ----
 const HERR = () => (CR && CR.herramientas) || [];
 // Herramientas que una clase o un trasfondo dejan elegir
@@ -2224,7 +2228,8 @@ function wzPericia() { const comp = wzCompetencias(); return (WZ().pericia || []
 function wzNombrePaso(i) {
   if (i !== 4 || !CR || !E.borradorPJ) return WZ_PASOS[i];
   const conj = wzGruposConj().length || wzConjFijos().length || wzMagiaDotes().length;
-  return esPicaro() ? (conj ? 'Pericia y conjuros' : 'Pericia') : 'Conjuros';
+  const partes = [esPicaro() && 'Pericia', wzEstilo1() && 'Estilo de combate', (conj || (!esPicaro() && !wzEstilo1())) && 'Conjuros'].filter(Boolean);
+  return partes.length > 1 ? partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1].toLowerCase() : partes[0];
 }
 const WZ = () => E.borradorPJ;
 const wzClase = () => CR.clases.find(c => c.id === WZ().clase);
@@ -2303,6 +2308,7 @@ function wzDotes() {
   const w = WZ(), tr = wzTras(), l = [];
   if (tr) l.push({ id: tr.doteId, nombre: tr.dote, origen: 'trasfondo' });
   if (w.especie === 'humano' && w.doteHumano) { const d = doteSRD(w.doteHumano); if (d) l.push({ id: d.id, nombre: d.nombre, origen: 'especie' }); }
+  if (wzEstilo1() && w.estilo) { const d = doteSRD(w.estilo); if (d) l.push({ id: d.id, nombre: d.nombre, origen: 'clase' }); }
   return l;
 }
 function wzFalta(p) {
@@ -2329,6 +2335,7 @@ function wzFalta(p) {
   if (p === 3 && !wzBase()) return 'Escribe las 6 tiradas (cada una entre 3 y 18)';
   if (p === 4) {
     if (esPicaro() && wzPericia().length !== 2) return 'Pericia: elige 2 habilidades';
+    if (wzEstilo1() && !w.estilo) return 'Elige el estilo de combate';
     for (const m of wzMagiaDotes()) { if (!m.lista) return 'Elige la lista de conjuros de Iniciado en la magia'; if (!m.apt) return 'Elige la aptitud mágica de Iniciado en la magia'; }
     for (const g of wzGruposConj()) if (g.elegidos.length !== g.n) return `${g.titulo}: elige ${g.n} (llevas ${g.elegidos.length})`;
   }
@@ -2522,10 +2529,17 @@ function htmlPericia() {
     <h3 class="sub-tit">Elige 2 habilidades <span class="cuenta">${sel.length}/2</span></h3>
     <div class="chips">${comp.map(h => wzChip('wzPericia', 'pericia', h, sel.includes(h), (/^(Juego de manos|Sigilo)$/.test(h) ? '★ ' : '') + txt(h))).join('')}</div>`;
 }
+function htmlEstilo1() {
+  const w = WZ(), sel = CR.dotes.find(d => d.id === w.estilo);
+  return `<div class="reglas-box"><div class="reglas-tit">Estilo de combate · rasgo de guerrero de nivel 1</div>
+      <p style="margin:4px 0">Elige una dote de estilo de combate. El SRD recomienda <b>Defensa</b>. Cada vez que suba de nivel de guerrero puede cambiarla por otra.</p></div>
+    <div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'estilo-de-combate').map(d => wzOp('wzSet', 'estilo', d.id, w.estilo === d.id, d.nombre + (d.id === 'defensa' ? ' ★' : ''), '')).join('')}</div>
+    ${sel ? `<div class="wz-det">${sel.html}</div>` : ''}`;
+}
 function wzPasoPericiaConjuros() {
-  if (!esPicaro()) return wzPasoConjuros();
+  if (!esPicaro() && !wzEstilo1()) return wzPasoConjuros();
   const hay = wzGruposConj().length || wzConjFijos().length || wzMagiaDotes().length;
-  return htmlPericia() + (hay ? `<h2 style="font-size:1.05rem;margin:22px 0 4px">Conjuros</h2>${wzPasoConjuros()}` : '');
+  return (esPicaro() ? htmlPericia() : '') + (wzEstilo1() ? htmlEstilo1() : '') + (hay ? `<h2 style="font-size:1.05rem;margin:22px 0 4px">Conjuros</h2>${wzPasoConjuros()}` : '');
 }
 function wzPasoConjuros() {
   const w = WZ(), grupos = wzGruposConj(), fijos = wzConjFijos(), magia = wzMagiaDotes(), c = wzClase();
@@ -2601,6 +2615,7 @@ function wzHoja() {
   const arm = ARMADURAS_INICIALES.find(a => a.re.test(eqClase));
   if (arm) { ca = arm.base + Math.min(md('des'), arm.maxDes); caNota = arm.nombre + (arm.maxDes ? ` (${arm.base} + Des${arm.maxDes < 9 ? ', máx. +' + arm.maxDes : ''})` : ` (${arm.base})`); }
   if (/\bescudo\b/.test(eqClase)) { ca += 2; caNota += ' + escudo (+2)'; }
+  if (arm && dotes.some(d => d.id === 'defensa')) { ca += 1; caNota += ' + Defensa (+1)'; }
   const pg = Math.max(1, dadoGolpe(c) + md('con') + (e.id === 'enano' ? 1 : 0));
   const comp = wzCompetencias();
   const pericia = new Set((c.id === 'picaro' ? wzPericia() : []).map(norm));
@@ -2679,7 +2694,7 @@ A.wzSet = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v;
   if (w[k] === v && (k === 'habEspecie' || k === 'doteHumano')) w[k] = null; else w[k] = v;
   w.magia ||= {};
-  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.conj = {}; w.herrClase = []; w.pericia = []; }
+  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.conj = {}; w.herrClase = []; w.pericia = []; w.estilo = null; }
   if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; delete w.magia.trasfondo; w.herrTras = []; }
   if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; w.herrDote = []; delete w.magia.especie; }
   if (k === 'doteHumano') { w.habDote = []; w.herrDote = []; delete w.magia.especie; }
@@ -2780,9 +2795,335 @@ A.wzCrear = () => {
   E.personajes.push(pj);
   E.borradorPJ = null;
   A.rellenarEspacios({ dataset: { pj: pj.id } });
-  navegar('#/personaje/' + pj.id);
+  navegar('#/hoja/' + pj.id);
   setTimeout(() => toast(`${pj.nombre} creado`), 50);
 };
+// ============ Hoja completa del personaje (fase 4) ============
+const clasePJ = pj => CR && pj.hoja && CR.clases.find(c => c.id === pj.hoja.clase);
+// Niveles en los que se repite un rasgo («Vuelves a obtener este rasgo en los niveles 8, 12 y 16»)
+function nivelesRasgo(r) {
+  const m = r.html.replace(/<[^>]+>/g, '').match(/[Vv]uelves a obtener este rasgo en los niveles ([\d,\sy]+)/);
+  return [r.nivel, ...(m ? m[1].match(/\d+/g).map(Number) : [])];
+}
+// Rasgos de clase (y de subclase desde el nivel 3) que se ganan justo en el nivel n
+function rasgosDeNivel(c, n) {
+  const l = c.rasgos.filter(r => nivelesRasgo(r).includes(n)).map(r => ({ ...r, de: 'clase' }));
+  if (c.subclase) l.push(...c.subclase.rasgos.filter(r => r.nivel === n).map(r => ({ ...r, de: 'subclase' })));
+  return l;
+}
+function rasgosHasta(c, n) {
+  const l = c.rasgos.filter(r => r.nivel <= n).map(r => ({ ...r, de: 'clase' }));
+  if (c.subclase && n >= 3) l.push(...c.subclase.rasgos.filter(r => r.nivel <= n).map(r => ({ ...r, de: 'subclase' })));
+  return l.sort((a, b) => a.nivel - b.nivel);
+}
+// Pericia que da cada clase por nivel (SRD 5.2.1: pícaro 1 y 6, bardo 2 y 9, explorador 2 —Explorador hábil— y 9)
+const PERICIA_NIVEL = { picaro: { 1: 2, 6: 2 }, bardo: { 2: 2, 9: 2 }, explorador: { 2: 1, 9: 2 } };
+function habilidadesPJ(pj) {
+  const comp = new Set((pj.hoja.habilidades || []).map(norm)), per = new Set((pj.hoja.pericia || []).map(norm)), bc = bcDeNivel(pj.nivel);
+  return CR.habilidades.map(h => {
+    const c = comp.has(norm(h.nombre)), p = c && per.has(norm(h.nombre));
+    return { ...h, comp: c, pericia: p, total: modDe(pj[h.car] ?? 10) + (c ? bc * (p ? 2 : 1) : 0) };
+  });
+}
+const pasivaPJ = pj => 10 + habilidadesPJ(pj).find(h => h.id === 'percepcion').total;
+VISTAS.hoja = id => {
+  const pj = pjPorId(id); if (!pj) return null;
+  const c = clasePJ(pj);
+  if (!c) return { titulo: pj.nombre, atras: '#/personajes', html: `<p class="vacio">Este perfil se creó rápido, sin el creador, así que no tiene hoja completa.</p><a class="btn ancho" href="#/personaje/${pj.id}">Ver su perfil</a>` };
+  const h = pj.hoja, n = pj.nivel || 1, bc = bcDeNivel(n);
+  const e = CR.especies.find(x => x.id === h.especie), t = CR.trasfondos.find(x => x.id === h.trasfondo);
+  const l = e && e.linaje && e.linaje.opciones.find(o => o.id === h.linaje);
+  const alin = CR.alineamientos.find(a => a.abr === h.alineamiento);
+  const vel = (l && l.velocidad) || (e && e.velocidad) || 9, vis = (l && l.vision) || (e && e.vision) || 0;
+  const salv = pj.salvComp || [];
+  const habs = habilidadesPJ(pj);
+  const ini = (pj.iniDes !== false ? modDe(pj.des) : 0) + (pj.iniBC ? bc : 0) + (pj.iniExtra || 0);
+  const fila = (k, v) => v ? `<p><b>${k}:</b> ${v}</p>` : '';
+  const det = (nombre, html, k, extra = '') => `<details class="regla" data-k="${k}"><summary>${esc(nombre)}${extra}</summary><div class="cuerpo">${html}</div></details>`;
+  const dotes = (h.dotes || []).map(d => ({ ...d, srd: CR.dotes.find(x => x.id === d.id) }));
+  const conj = (pj.conjuros || []).map(i => CONJ.get(i)).filter(Boolean).sort(ordenConj);
+  const html = `
+    <div class="wz-det wz-resumen">
+      <p class="nota" style="margin:0 0 8px">${esc(c.nombre)} de nivel ${n}${h.subclase ? ` (${esc(h.subclase)})` : ''} · ${esc(e ? e.nombre : '')}${l ? ` (${esc(l.nombre.replace(/\s*\(.*\)$/, ''))})` : ''} · ${esc(t ? t.nombre : '')}${alin ? ' · ' + esc(alin.nombre) : ''}${pj.jugador ? ` · jugado por ${esc(pj.jugador)}` : ''}</p>
+      <div class="wz-stats"><div><span>CA</span><b>${pj.ca ?? '—'}</b></div><div><span>PG máx.</span><b>${pj.pgMax ?? '—'}</b></div><div><span>Iniciativa</span><b>${signo(ini)}</b></div>
+        <div><span>Velocidad</span><b>${String(vel).replace('.', ',')} m</b></div><div><span>BC</span><b>${signo(bc)}</b></div><div><span>Perc. pasiva</span><b>${pasivaPJ(pj)}</b></div></div>
+      ${vis || h.tamano ? `<p class="nota" style="margin:6px 0 0">${h.tamano ? 'Tamaño ' + esc(h.tamano) : ''}${vis ? ` · visión en la oscuridad ${vis} m` : ''}</p>` : ''}
+    </div>
+    <h3 class="sub-tit">Características y salvaciones</h3>
+    <div class="cars-pj">${CARS_PJ.map(([k, nom]) => `<div class="car-pj${salv.includes(k) ? ' comp' : ''}"><span>${nom}</span><b class="wz-pt">${pj[k] ?? 10}</b><b>${signo(modDe(pj[k]))}</b><small>Salv. ${signo(modDe(pj[k]) + (salv.includes(k) ? bc : 0))}${salv.includes(k) ? ' ●' : ''}</small></div>`).join('')}</div>
+    <h3 class="sub-tit">Habilidades</h3>
+    <div class="wz-habs">${habs.map(x => `<div class="${x.comp ? 'comp' : ''}"><span>${x.pericia ? '◆ ' : x.comp ? '● ' : ''}${esc(x.nombre)} <small>(${CAR_ABR[x.car]})</small></span><b>${signo(x.total)}</b></div>`).join('')}</div>
+    <p class="nota">● Competente (+${bc}).${habs.some(x => x.pericia) ? ` ◆ Pericia (+${bc * 2}).` : ''}</p>
+    <h3 class="sub-tit">Rasgos de clase</h3>
+    ${rasgosHasta(c, n).map((r, i) => det(r.nombre, r.html, 'hr' + i, ` <small class="nv">nv. ${r.nivel}${r.de === 'subclase' ? ' · ' + esc(c.subclase.nombre) : ''}</small>`)).join('')}
+    ${e ? `<h3 class="sub-tit">Atributos de especie (${esc(e.nombre)})</h3>${e.rasgos.map((r, i) => det(r.nombre, r.html + (l && r.nombre === e.linaje.rasgo ? `<p><b>Elegido: ${esc(l.nombre)}.</b></p>${detalleLinaje(e, l)}` : ''), 'he' + i)).join('')}` : ''}
+    ${dotes.length ? `<h3 class="sub-tit">Dotes</h3>${dotes.map((d, i) => det(d.nombre, d.srd ? d.srd.html : '', 'hd' + i, d.origen ? ` <small class="nv">${esc(String(d.origen))}</small>` : '')).join('')}` : ''}
+    <h3 class="sub-tit">Competencias</h3>
+    <div class="wz-det">${fila('Armaduras', esc(c.armaduras))}${fila('Armas', esc(c.armas))}${fila('Herramientas', esc((h.herramientas || [h.herramienta]).filter(Boolean).join(', ')))}${fila('Idiomas', esc((h.idiomas || []).join(', ')))}</div>
+    ${conj.length ? `<h3 class="sub-tit">Conjuros</h3><div class="lista">${conj.map(x => `<div class="fila"><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}</div></div></div>`).join('')}</div>` : ''}
+    <h3 class="sub-tit">Equipo y personaje</h3>
+    <div class="wz-det">${fila('Equipo inicial', esc((h.equipo || []).join(' + ')))}${fila('Descripción', esc(h.descripcion))}${fila('Personalidad e historia', esc(h.personalidad))}</div>
+    ${(h.niveles || []).length ? `<h3 class="sub-tit">Historial de niveles</h3><div class="wz-det">${h.niveles.map(x => `<p><b>Nivel ${x.nivel}:</b> ${esc(x.resumen)}</p>`).join('')}</div>` : ''}`;
+  return {
+    titulo: pj.nombre || 'Personaje', atras: '#/personajes', html,
+    acciones: `<a class="icono" href="#/personaje/${pj.id}" aria-label="Editar datos de combate">${ic(IC.editar)}</a>`,
+    pie: n < 20 ? `<a class="btn secundario" href="#/personaje/${pj.id}">Editar</a><button class="btn primario" data-a="subirNivel" data-id="${pj.id}">Subir a nivel ${n + 1}</button>` : `<a class="btn" href="#/personaje/${pj.id}">Editar datos de combate</a>`
+  };
+};
+
+// ============ Subir de nivel (fase 4) ============
+const RE_CAR = 'Fuerza|Destreza|Constitución|Inteligencia|Sabiduría|Carisma';
+const carDeNombre = n => (CARS_PJ.find(([, x]) => norm(x) === norm(n)) || [])[0];
+const tieneRasgo = (c, re, n) => c.rasgos.some(r => re.test(r.nombre) && r.nivel <= n);
+// ¿Cumple los requisitos de la dote? (nivel, características, rasgos)
+function cumpleReq(d, c, n, cars) {
+  if (d.nivelMin > n) return false;
+  const req = d.requisitos || '';
+  const m = req.match(new RegExp(`((?:${RE_CAR})(?:\\s+o\\s+(?:${RE_CAR}))*)\\s+(\\d+) o más`));
+  if (m && !m[1].split(/\s+o\s+/).some(x => (cars[carDeNombre(x)] || 0) >= +m[2])) return false;
+  if (/rasgo Estilo de combate/.test(req) && !tieneRasgo(c, /^Estilo de combate/, n)) return false;
+  if (/rasgo Lanzamiento de conjuros/.test(req) && !tieneRasgo(c, /Lanzamiento de conjuros|Magia del pacto/, n)) return false;
+  return true;
+}
+// Aumento de característica que da una dote: {opciones, max} (la dote Mejora de característica es aparte)
+function aumentoDote(d) {
+  const t = d.html.replace(/<[^>]+>/g, '');
+  let m = t.match(/Aumenta tu puntuación de (.+?) en 1, hasta un máximo de (\d+)/);
+  if (m) return { opciones: m[1].split(/,\s*|\s+o\s+/).map(carDeNombre).filter(Boolean), max: +m[2] };
+  m = t.match(/Aumenta una puntuación de característica de tu elección en 1, hasta un máximo de (\d+)/);
+  if (m) return { opciones: CARS_PJ.map(([k]) => k), max: +m[1] };
+  return null;
+}
+const ranura = () => ({ tipo: 'car', modo: '2', a: null, b: null, dote: null, car: null, lista: null, apt: null, T: [], C: [], hab: [], herr: [] });
+function planSubida(pj) {
+  const c = clasePJ(pj), n = (pj.nivel || 1) + 1, rasgos = rasgosDeNivel(c, n);
+  return {
+    c, n, rasgos,
+    mejora: rasgos.some(r => r.nombre === 'Mejora de característica'),
+    don: rasgos.some(r => r.nombre === 'Don épico'),
+    estilo: rasgos.find(r => /^Estilo de combate/.test(r.nombre)),
+    pericia: (PERICIA_NIVEL[c.id] || {})[n] || 0,
+    idiomas: c.id === 'explorador' && n === 2 ? 2 : 0,
+    subclase: n === 3 && c.subclase
+  };
+}
+const SU = () => E.subidaPJ;
+A.subirNivel = el => {
+  const pj = pjPorId(el.dataset.id); if (!pj || !clasePJ(pj)) return;
+  if (!E.subidaPJ || E.subidaPJ.pjId !== pj.id || E.subidaPJ.nivel !== (pj.nivel || 1) + 1)
+    E.subidaPJ = { pjId: pj.id, nivel: (pj.nivel || 1) + 1, pgModo: 'media', pgTirada: '', ranuras: { mejora: ranura(), don: { ...ranura(), tipo: 'dote' }, estilo: { ...ranura(), tipo: 'dote' } }, pericia: [], idiomas: [], defensaCA: true };
+  guardar(); navegar('#/subir/' + pj.id);
+};
+// Puntuaciones tras aplicar las elecciones de esta subida
+function suCaracteristicas(pj) {
+  const s = SU(), cars = Object.fromEntries(CARS_PJ.map(([k]) => [k, pj[k] ?? 10]));
+  const r = s.ranuras.mejora, p = planSubida(pj);
+  if (p.mejora) {
+    if (r.tipo === 'car') { if (r.modo === '2' && r.a) cars[r.a] = Math.min(20, cars[r.a] + 2); if (r.modo === '11') { if (r.a) cars[r.a] = Math.min(20, cars[r.a] + 1); if (r.b) cars[r.b] = Math.min(20, cars[r.b] + 1); } }
+    else if (r.dote && r.car) { const au = aumentoDote(CR.dotes.find(d => d.id === r.dote)); if (au) cars[r.car] = Math.min(au.max, cars[r.car] + 1); }
+  }
+  const d = s.ranuras.don;
+  if (p.don && d.dote && d.car) { const au = aumentoDote(CR.dotes.find(x => x.id === d.dote)); if (au) cars[d.car] = Math.min(au.max, cars[d.car] + 1); }
+  return cars;
+}
+function suPG(pj) {
+  const s = SU(), c = clasePJ(pj), dado = dadoGolpe(c), media = dado / 2 + 1;
+  const cars = suCaracteristicas(pj), conAntes = modDe(pj.con ?? 10), conDesp = modDe(cars.con);
+  const base = s.pgModo === 'tirada' ? +s.pgTirada : media;
+  const valida = s.pgModo !== 'tirada' || (Number.isInteger(base) && base >= 1 && base <= dado);
+  const enano = pj.hoja.especie === 'enano' ? 1 : 0;
+  const nivel = valida ? Math.max(1, base + conDesp) + enano : 0;
+  const retro = (conDesp - conAntes) * (pj.nivel || 1);
+  return { dado, media, base, valida, conDesp, enano, nivel, retro, total: nivel + retro };
+}
+// Chips de elección para la subida: data-max limita cuántos se pueden marcar
+const suChip = (s, k, v, on, txt, max, deshab) => `<button class="chip${on ? ' on' : ''}" data-a="suTog" data-s="${s}" data-k="${k}" data-v="${esc(v)}" data-max="${max}" aria-pressed="${on}" ${deshab ? 'disabled' : ''}>${esc(txt)}</button>`;
+const suOpc = (s, k, v, on, txt, deshab) => `<button class="opc ${on ? 'on' : ''}" data-a="suSet" data-s="${s}" data-k="${k}" data-v="${esc(v)}" ${deshab ? 'disabled' : ''}>${txt}</button>`;
+// Lista para elegir conjuros (trucos o nivel 1) de una lista de clase
+function suListaConj(s, k, lista, nivel, elegidos, n, conocidos) {
+  const ops = CONJS.filter(x => x.nivel === nivel && (x.clases || []).some(cl => slug(cl) === lista)).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  return `<div class="lista">${ops.map(x => { const on = elegidos.includes(x.id), bloq = !on && conocidos.has(x.id);
+    return `<div class="fila"><button class="marca-conj ${on ? 'on' : ''}" data-a="suTog" data-s="${s}" data-k="${k}" data-v="${x.id}" data-max="${n}" ${bloq ? 'disabled' : ''}>${on ? '✓' : '+'}</button>
+      <div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${esc(x.escuela)}${bloq ? ' · ya lo conoce' : ''}</div></div></div>`; }).join('')}</div>`;
+}
+// Elecciones extra de algunas dotes (aumento de característica, Iniciado en la magia, Habilidoso)
+function htmlExtrasDote(pj, s, r, cars) {
+  const d = CR.dotes.find(x => x.id === r.dote); if (!d) return '';
+  let html = `<div class="wz-det">${d.html}</div>`;
+  const au = aumentoDote(d);
+  if (au) html += `<p class="wz-grupo-herr">Aumenta en 1 (máximo ${au.max})</p><div class="seg">${au.opciones.map(k => suOpc(s, 'car', k, r.car === k, `${CAR_ABR[k]} ${pj[k] ?? 10}`, (pj[k] ?? 10) >= au.max)).join('')}</div>`;
+  if (d.id === 'iniciado-en-la-magia') {
+    const usadas = (pj.hoja.magia || []).map(m => m.lista);
+    const conocidos = new Set([...(pj.conjuros || []), ...['T', 'C'].flatMap(k => Object.values(SU().ranuras).filter(x => x !== r).flatMap(x => x[k] || []))]);
+    html += `<p class="wz-grupo-herr">Lista de conjuros</p><div class="seg">${LISTAS_MAGIA.map(([k, nom]) => suOpc(s, 'lista', k, r.lista === k, nom, usadas.includes(k))).join('')}</div>
+      <p class="wz-grupo-herr">Aptitud mágica</p><div class="seg">${['int', 'sab', 'car'].map(k => suOpc(s, 'apt', k, r.apt === k, CAR_NOMBRE[k])).join('')}</div>`;
+    if (r.lista) html += `<p class="wz-grupo-herr">2 trucos <span class="cuenta">${r.T.length}/2</span></p>${suListaConj(s, 'T', r.lista, 0, r.T, 2, conocidos)}
+      <p class="wz-grupo-herr">1 conjuro de nivel 1 <span class="cuenta">${r.C.length}/1</span></p>${suListaConj(s, 'C', r.lista, 1, r.C, 1, conocidos)}`;
+  }
+  if (d.id === 'habilidoso') {
+    const comp = new Set((pj.hoja.habilidades || []).map(norm)), herrYa = new Set((pj.hoja.herramientas || []).map(norm));
+    const total = r.hab.length + r.herr.length;
+    html += `<p class="nota">Elige 3 en total entre habilidades y herramientas <span class="cuenta">${total}/3</span></p>
+      <p class="wz-grupo-herr">Habilidades</p><div class="chips">${CR.habilidades.map(h => suChip(s, 'hab', h.nombre, r.hab.includes(h.nombre), h.nombre, 3 - r.herr.length, comp.has(norm(h.nombre)))).join('')}</div>
+      ${GRUPOS_HERR.map(([tit, f]) => `<p class="wz-grupo-herr">${tit}</p><div class="chips">${HERR().filter(f).map(h => suChip(s, 'herr', h.nombre, r.herr.includes(h.nombre), h.grupo ? h.nombre.replace(/^[^:]+:\s*/, '') : h.nombre, 3 - r.hab.length, herrYa.has(norm(h.nombre)))).join('')}</div>`).join('')}
+      <p class="wz-grupo-herr">Herramienta personalizada</p>
+      ${r.herr.filter(x => !HERR().some(h => h.nombre === x)).map(x => suChip(s, 'herr', x, true, x + ' ✕', 3)).join(' ')}
+      <div class="fila-anadir"><input id="su-herr-${s}" placeholder="Escribe una herramienta inventada" maxlength="60"><button class="btn peq" data-a="suHerrPropia" data-s="${s}">Añadir</button></div>`;
+  }
+  return html;
+}
+function htmlElegirDote(pj, s, r, filtro, cars) {
+  const p = planSubida(pj), tomadas = new Set((pj.hoja.dotes || []).map(d => d.id));
+  const otras = Object.entries(SU().ranuras).filter(([k]) => k !== s && p[k]).map(([, x]) => x.dote).filter(Boolean);
+  const ops = CR.dotes.filter(d => filtro(d) && (d.repetible || (!tomadas.has(d.id) && !otras.includes(d.id))));
+  const cats = [['origen', 'De origen'], ['generales', 'Generales'], ['estilo-de-combate', 'De estilo de combate'], ['don-epico', 'Dones épicos']];
+  return cats.map(([cat, tit]) => { const l = ops.filter(d => d.categoria === cat); if (!l.length) return '';
+    return `<p class="wz-grupo-herr">${tit}</p><div class="wz-ops">${l.map(d => { const ok = cumpleReq(d, p.c, p.n, cars); const on = r.dote === d.id;
+      return `<button class="wz-op${on ? ' on' : ''}" data-a="suSet" data-s="${s}" data-k="dote" data-v="${d.id}" ${ok ? '' : 'disabled'}><b>${esc(d.nombre)}</b>${d.requisitos ? `<small>Requisitos: ${esc(d.requisitos)}${ok ? '' : ' (no los cumple)'}</small>` : ''}</button>${on ? htmlExtrasDote(pj, s, r, cars) : ''}`; }).join('')}</div>`; }).join('');
+}
+function suFalta(pj) {
+  const s = SU(), p = planSubida(pj), pg = suPG(pj);
+  if (!pg.valida) return `Escribe lo que ha sacado en el d${pg.dado} (de 1 a ${pg.dado})`;
+  const dote = (r, nombre) => {
+    if (!r.dote) return `${nombre}: elige una dote`;
+    const d = CR.dotes.find(x => x.id === r.dote);
+    if (aumentoDote(d) && !r.car) return `${nombre}: elige qué característica aumenta`;
+    if (d.id === 'iniciado-en-la-magia' && (!r.lista || !r.apt || r.T.length !== 2 || r.C.length !== 1)) return `${nombre}: completa Iniciado en la magia (lista, aptitud, 2 trucos y 1 conjuro)`;
+    if (d.id === 'habilidoso' && r.hab.length + r.herr.length !== 3) return `${nombre}: elige 3 entre habilidades y herramientas`;
+    return '';
+  };
+  if (p.mejora) { const r = s.ranuras.mejora; if (r.tipo === 'car') { if (!r.a || (r.modo === '11' && (!r.b || r.b === r.a))) return 'Mejora de característica: elige qué características suben'; } else { const f = dote(r, 'Mejora de característica'); if (f) return f; } }
+  if (p.don) { const f = dote(s.ranuras.don, 'Don épico'); if (f) return f; }
+  if (p.estilo) { const r = s.ranuras.estilo; if (r.tipo === 'trucos') { if (r.T.length !== 2) return 'Elige 2 trucos'; } else if (!r.dote) return 'Elige el estilo de combate'; }
+  if (p.pericia && s.pericia.length !== p.pericia) return `Pericia: elige ${p.pericia}`;
+  if (p.idiomas && s.idiomas.length !== p.idiomas) return `Elige ${p.idiomas} idiomas`;
+  return '';
+}
+VISTAS.subir = id => {
+  const pj = pjPorId(id), c = pj && clasePJ(pj);
+  if (!c || !SU() || SU().pjId !== id || SU().nivel !== (pj.nivel || 1) + 1) return { titulo: 'Subir de nivel', atras: pj ? '#/hoja/' + id : '#/personajes', html: `<p class="vacio">No hay ninguna subida de nivel en marcha.</p>` };
+  const s = SU(), p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj);
+  const sec = (t, h) => `<section class="bloque"><h2 style="font-size:1.02rem;margin:0 0 6px">${t}</h2>${h}</section>`;
+  let html = `<p class="wz-paso">${esc(pj.nombre)} · ${esc(c.nombre)} de nivel ${p.n - 1} → ${p.n}</p>`;
+  // 1. Puntos de golpe
+  html += sec('Puntos de golpe', `<p class="nota" style="margin-top:0">En cada nivel gana su dado de golpe (d${pg.dado}) + su modificador de Constitución (${signo(pg.conDesp)})${pg.enano ? ' + 1 por Aguante enano' : ''}. Puedes tirar el dado o usar el valor fijo.</p>
+    <div class="seg"><button class="opc ${s.pgModo === 'media' ? 'on' : ''}" data-a="suSet" data-s="" data-k="pgModo" data-v="media">Valor fijo (${pg.media})</button><button class="opc ${s.pgModo === 'tirada' ? 'on' : ''}" data-a="suSet" data-s="" data-k="pgModo" data-v="tirada">Tirar el d${pg.dado}</button></div>
+    ${s.pgModo === 'tirada' ? `<label class="campo"><span>Resultado del d${pg.dado}</span><input class="cant" data-in="suPG" type="number" inputmode="numeric" min="1" max="${pg.dado}" value="${esc(s.pgTirada)}"></label>` : ''}
+    <p class="wz-pg" id="su-pg">${htmlSuPG(pj)}</p>`);
+  // 2. Rasgos nuevos
+  html += sec(`Rasgos nuevos de nivel ${p.n}`, (p.subclase ? `<p class="nota" style="margin-top:0">Subclase: <b>${esc(c.subclase.nombre)}</b> (la única del SRD para ${esc(c.nombre.toLowerCase())}).</p>` : '')
+    + (p.rasgos.length ? p.rasgos.map((r, i) => `<details class="regla"><summary>${esc(r.nombre)}${r.de === 'subclase' ? ` <small class="nv">${esc(c.subclase.nombre)}</small>` : ''}</summary><div class="cuerpo">${r.html}</div></details>`).join('') : '<p class="nota">En este nivel no gana rasgos nuevos.</p>')
+    + `<p class="nota">Bonificador por competencia: ${signo(bcDeNivel(p.n))}${bcDeNivel(p.n) > bcDeNivel(p.n - 1) ? ' (¡sube!)' : ''}.</p>`);
+  // 3. Mejora de característica
+  if (p.mejora) {
+    const r = s.ranuras.mejora;
+    let h = `<div class="seg">${suOpc('mejora', 'tipo', 'car', r.tipo === 'car', 'Subir características')}${suOpc('mejora', 'tipo', 'dote', r.tipo === 'dote', 'Elegir otra dote')}</div>`;
+    if (r.tipo === 'car') {
+      h += `<p class="nota">Aumenta en 2 una característica, o en 1 dos distintas. Ninguna puede pasar de 20.</p>
+        <div class="seg">${suOpc('mejora', 'modo', '2', r.modo === '2', '+2 a una')}${suOpc('mejora', 'modo', '11', r.modo === '11', '+1 a dos')}</div>
+        <div class="wz-bonus"><span>${r.modo === '2' ? '+2 a' : '+1 a'}</span><div class="seg">${CARS_PJ.map(([k]) => suOpc('mejora', 'a', k, r.a === k, `${CAR_ABR[k]} ${pj[k] ?? 10}`, (pj[k] ?? 10) > (r.modo === '2' ? 18 : 19))).join('')}</div></div>
+        ${r.modo === '11' ? `<div class="wz-bonus"><span>+1 a</span><div class="seg">${CARS_PJ.map(([k]) => suOpc('mejora', 'b', k, r.b === k, `${CAR_ABR[k]} ${pj[k] ?? 10}`, k === r.a || (pj[k] ?? 10) > 19)).join('')}</div></div>` : ''}`;
+    } else h += `<p class="nota">En lugar de subir características puede elegir otra dote para la que cumpla los requisitos.</p>` + htmlElegirDote(pj, 'mejora', r, d => d.categoria !== 'don-epico' && d.id !== 'mejora-de-caracteristica', cars);
+    html += sec('Mejora de característica', h);
+  }
+  if (p.don) html += sec('Don épico', `<p class="nota" style="margin-top:0">Elige un don épico u otra dote para la que cumpla los requisitos. El SRD recomienda Don del ataque imparable.</p>` + htmlElegirDote(pj, 'don', s.ranuras.don, () => true, cars));
+  if (p.estilo) {
+    const r = s.ranuras.estilo, alt = p.estilo.nombre === 'Estilo de combate' && (c.id === 'paladin' || c.id === 'explorador');
+    const altLista = c.id === 'paladin' ? 'clerigo' : 'druida', altNom = c.id === 'paladin' ? 'Guerrero bendito (2 trucos de clérigo)' : 'Guerrero druídico (2 trucos de druida)';
+    let h = alt ? `<div class="seg">${suOpc('estilo', 'tipo', 'dote', r.tipo === 'dote', 'Dote de estilo de combate')}${suOpc('estilo', 'tipo', 'trucos', r.tipo === 'trucos', esc(altNom))}</div>` : '';
+    if (r.tipo === 'trucos' && alt) h += `<p class="nota">Aprende 2 trucos <span class="cuenta">${r.T.length}/2</span>. Usa Carisma (paladín) o Sabiduría (explorador) para lanzarlos.</p>${suListaConj('estilo', 'T', altLista, 0, r.T, 2, new Set(pj.conjuros || []))}`;
+    else {
+      h += htmlElegirDote(pj, 'estilo', r, d => d.categoria === 'estilo-de-combate', cars);
+      if (r.dote === 'defensa') h += `<label class="check"><input type="checkbox" data-ch="suDefensa" ${s.defensaCA ? 'checked' : ''}><span>Lleva armadura: sumar +1 a su CA ahora (${pj.ca} → ${pj.ca + 1})</span></label>`;
+    }
+    html += sec(esc(p.estilo.nombre), h);
+  }
+  if (p.pericia) {
+    const comp = (pj.hoja.habilidades || []).slice().sort((a, b) => a.localeCompare(b, 'es')), ya = new Set((pj.hoja.pericia || []).map(norm));
+    html += sec('Pericia', `<p class="nota" style="margin-top:0">Elige ${p.pericia === 1 ? '1 habilidad' : p.pericia + ' habilidades'} en las que ya es competente y aún no tiene pericia. Su bonificador por competencia se duplica en ellas.</p>
+      <div class="chips">${comp.map(h => suChip('', 'pericia', h, s.pericia.includes(h), h, p.pericia, ya.has(norm(h)))).join('')}</div>`);
+  }
+  if (p.idiomas) {
+    const sabe = new Set((pj.hoja.idiomas || []).map(norm));
+    html += sec('Idiomas (Explorador hábil)', `<p class="nota" style="margin-top:0">Aprende 2 idiomas de su elección.</p><div class="chips">${[...CR.idiomas.estandar, ...CR.idiomas.inusuales].map(i => suChip('', 'idiomas', i, s.idiomas.includes(i), i, 2, sabe.has(norm(i)))).join('')}</div>`);
+  }
+  const tipo = tipoLanzador(c.nombre);
+  if (tipo) {
+    const esp = tipo === 'pacto' ? `${PACTO_BRUJO[p.n][0]} espacios de nivel ${PACTO_BRUJO[p.n][1]}` : (tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[p.n].map((x, i) => x ? `${x} de nivel ${i + 1}` : '').filter(Boolean).join(', ');
+    html += sec('Conjuros', `<p class="nota" style="margin-top:0">Espacios de conjuro a nivel ${p.n}: <b>${esp}</b> (se actualizan solos). Mira en la tabla de rasgos de ${esc(c.nombre.toLowerCase())} si aprende trucos o puede preparar más conjuros, y añádelos después en su perfil.</p>`);
+  }
+  return { titulo: 'Subir de nivel', atras: '#/hoja/' + id, html, sinNav: true, pie: `<a class="btn secundario" href="#/hoja/${id}">Cancelar</a><button class="btn ok" data-a="suConfirmar">Subir a nivel ${p.n}</button>` };
+};
+function htmlSuPG(pj) {
+  const pg = suPG(pj);
+  if (!pg.valida) return `Escribe el resultado del d${pg.dado}.`;
+  return `Gana <b>${pg.nivel} PG</b> (${pg.base} ${signo(pg.conDesp)}${pg.enano ? ' +1' : ''}${pg.base + pg.conDesp < 1 ? ', mínimo 1' : ''})${pg.retro ? ` y <b>${signo(pg.retro)}</b> más porque su Constitución cambia de modificador en todos sus niveles` : ''}. PG máximos: ${pj.pgMax} → <b>${pj.pgMax + pg.total}</b>.`;
+}
+A.suSet = el => {
+  const s = SU(), r = el.dataset.s ? s.ranuras[el.dataset.s] : s, k = el.dataset.k, v = el.dataset.v;
+  r[k] = v;
+  if (el.dataset.s) {
+    if (k === 'tipo' || k === 'dote') Object.assign(r, { car: null, lista: null, apt: null, T: [], C: [], hab: [], herr: [], ...(k === 'tipo' ? { dote: null, a: null, b: null } : {}) });
+    if (k === 'modo') { r.a = r.b = null; }
+    if (k === 'a' && r.b === v) r.b = null;
+    if (k === 'lista') { r.T = []; r.C = []; }
+  }
+  guardar(); render();
+};
+A.suTog = el => {
+  const s = SU(), r = el.dataset.s ? s.ranuras[el.dataset.s] : s, lista = (r[el.dataset.k] ||= []), v = el.dataset.v, max = +el.dataset.max;
+  const i = lista.indexOf(v);
+  if (i >= 0) lista.splice(i, 1);
+  else if (lista.length >= max) { toast(`Ya has elegido ${max}. Quita uno primero.`); return; }
+  else lista.push(v);
+  guardar(); render();
+};
+A.suHerrPropia = el => {
+  const r = SU().ranuras[el.dataset.s], inp = $('#su-herr-' + el.dataset.s), v = (inp && inp.value || '').trim().replace(/\s+/g, ' ');
+  if (!v) { toast('Escribe el nombre de la herramienta'); return; }
+  if (r.hab.length + r.herr.length >= 3) { toast('Ya tienes 3 entre habilidades y herramientas. Quita una primero.'); return; }
+  r.herr.push(v.charAt(0).toUpperCase() + v.slice(1)); guardar(); render();
+};
+A.suConfirmar = () => {
+  const s = SU(), pj = pjPorId(s.pjId); if (!pj) return;
+  const falta = suFalta(pj); if (falta) { toast(falta); return; }
+  const p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj), h = pj.hoja, resumen = [];
+  const antes = Object.fromEntries(CARS_PJ.map(([k]) => [k, pj[k] ?? 10]));
+  Object.assign(pj, cars);
+  pj.nivel = p.n; pj.pgMax = (pj.pgMax || 0) + pg.total;
+  resumen.push(`+${pg.total} PG (${s.pgModo === 'tirada' ? 'tirada ' + pg.base : 'valor fijo'})`);
+  const subidas = CARS_PJ.filter(([k]) => cars[k] !== antes[k]).map(([k]) => `${CAR_ABR[k]} ${antes[k]}→${cars[k]}`);
+  h.dotes ||= []; h.habilidades ||= []; h.herramientas ||= []; h.pericia ||= []; h.idiomas ||= []; h.magia ||= []; pj.conjuros ||= [];
+  const ganarDote = (r, origen) => {
+    const d = CR.dotes.find(x => x.id === r.dote); if (!d) return;
+    h.dotes.push({ id: d.id, nombre: d.nombre + (d.id === 'iniciado-en-la-magia' ? ` (${LISTAS_MAGIA.find(x => x[0] === r.lista)[1].toLowerCase()})` : ''), origen });
+    resumen.push('dote ' + d.nombre);
+    if (d.id === 'alerta') { pj.alerta = true; pj.iniBC = true; }
+    if (d.id === 'iniciado-en-la-magia') { h.magia.push({ origen, lista: r.lista, apt: r.apt, trucos: r.T, conjuros: r.C }); pj.conjuros.push(...r.T, ...r.C); }
+    if (d.id === 'habilidoso') { h.habilidades.push(...r.hab); h.herramientas.push(...r.herr); }
+  };
+  if (p.mejora) { if (s.ranuras.mejora.tipo === 'car') resumen.push('Mejora de característica'); else ganarDote(s.ranuras.mejora, `nivel ${p.n}`); }
+  if (p.don) ganarDote(s.ranuras.don, `nivel ${p.n}`);
+  if (p.estilo) {
+    const r = s.ranuras.estilo;
+    if (r.tipo === 'trucos') { pj.conjuros.push(...r.T); resumen.push('2 trucos (' + r.T.map(i => CONJ.get(i).nombre).join(', ') + ')'); }
+    else { ganarDote(r, `nivel ${p.n}`); if (r.dote === 'defensa' && s.defensaCA) pj.ca = (pj.ca || 10) + 1; }
+  }
+  if (subidas.length) resumen.push(subidas.join(', '));
+  if (p.pericia) { h.pericia.push(...s.pericia); resumen.push('pericia en ' + s.pericia.join(' y ')); }
+  if (p.idiomas) { h.idiomas.push(...s.idiomas); resumen.push('idiomas ' + s.idiomas.join(' y ')); }
+  if (p.subclase) { h.subclase = p.c.subclase.nombre; resumen.push('subclase ' + h.subclase); }
+  const nuevos = p.rasgos.map(r => r.nombre).filter(x => !/^Mejora de característica$|^Don épico$/.test(x));
+  if (nuevos.length) resumen.push('rasgos: ' + nuevos.join(', '));
+  h.niveles ||= []; h.niveles.push({ nivel: p.n, resumen: resumen.join(' · '), fecha: Date.now() });
+  pj.conjuros = [...new Set(pj.conjuros)];
+  pj.pasiva = pasivaPJ(pj);
+  E.subidaPJ = null;
+  A.rellenarEspacios({ dataset: { pj: pj.id } });
+  navegar('#/hoja/' + pj.id);
+  setTimeout(() => toast(`${pj.nombre} sube a nivel ${p.n}`), 60);
+};
+
 // --- Personajes
 A.nuevoPJ = () => {
   const pj = { id: uid(), nombre: `Personaje ${E.personajes.length + 1}`, jugador: '', clase: '', nivel: 1, ca: 10, pgMax: 10, des: 10, iniDes: true, iniBC: false, iniExtra: 0, notas: '' };
@@ -2817,6 +3158,7 @@ A.borrarTodo = async () => {
 const I = {};
 // Creador de personajes: textos y tiradas (sin repintar, para no perder el foco)
 I.wz = el => { WZ()[el.dataset.k] = el.value; guardar(); };
+I.suPG = el => { const s = E.subidaPJ; if (!s) return; s.pgTirada = el.value.trim(); guardar(); const pj = pjPorId(s.pjId), t = $('#su-pg'); if (t && pj) t.innerHTML = htmlSuPG(pj); };
 I.wzTirada = el => {
   WZ().tiradas[+el.dataset.n] = el.value.trim(); guardar();
   const c = $('#wz-calc'); if (c) c.innerHTML = htmlWzCalculo();
@@ -2857,6 +3199,7 @@ function actualizarResultados(clave) {
   else { const h = hojaActual(); const r = h && $('#res-fa', h.el); if (r) r.innerHTML = htmlResultadosAnadir(); }
 }
 const C = {};
+C.suDefensa = el => { if (E.subidaPJ) { E.subidaPJ.defensaCA = el.checked; guardar(); } };
 C.feOrigen = () => { const h = hojaActual(); if (h) proponerVinculo(h); };
 C.feVinc = () => { const h = hojaActual(); if (h) h.vincManual = true; };
 C.pjchk = el => {
