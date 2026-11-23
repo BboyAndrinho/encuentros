@@ -548,3 +548,7 @@ details.regla summary small.nv { align-self: center; }
 .wz-op:disabled { opacity: .45; cursor: default; }
 .wz-bonus > span { width: auto; min-width: 44px; white-space: nowrap; }
 .wz-op small .no { color: var(--aviso); font-weight: 600; }
+/* Subida de nivel: lo que se va a quitar */
+.chip.on.quitar { background: color-mix(in srgb, var(--peligro) 20%, var(--superficie)); border-color: var(--peligro); }
+/* Aviso de herramientas repetidas en el creador */
+.aviso .botonera-mini { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }

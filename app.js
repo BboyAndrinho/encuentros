@@ -868,6 +868,7 @@ VISTAS.personaje = id => {
     ${campo('jugador', 'Jugador (opcional)')}
     <div class="fila2">${campo('clase', 'Clase y especie', 'text', 'placeholder="p. ej. Pícaro elfo"')}${campo('nivel', 'Nivel', 'number', 'min="1" max="20"')}</div>
     <div class="fila2">${campo('ca', 'CA', 'number')}${campo('pgMax', 'PG máximos', 'number')}</div>
+    ${clasePJ(pj) ? `<p class="nota" style="margin-top:0">La CA se calcula con la armadura y el escudo que lleva (se eligen en su hoja completa). Si la cambias aquí a mano, la diferencia se guarda como «otros bonos a la CA».</p>` : ''}
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 6px">Características</h2>
       <div class="cars-pj">${CARS_PJ.map(([k, etq]) => `<label class="car-pj"><span>${etq}</span>
         <input data-in="pj" data-ch="pjSync" data-k="${k}" type="number" inputmode="numeric" min="1" max="30" placeholder="10" value="${esc(pj[k] ?? '')}">
@@ -2266,16 +2267,78 @@ const ARCANUM_NIVEL = { 11: 6, 13: 7, 15: 8, 17: 9 };
 // Académico (mago, nivel 2): pericia en una de estas habilidades en las que ya sea competente
 const SENTIDOS_AGUDOS = ['Percepción', 'Perspicacia', 'Supervivencia'];
 const ACADEMICO = ['Conocimiento arcano', 'Historia', 'Investigación', 'Medicina', 'Naturaleza', 'Religión'];
-// Clase de armadura calculada con su armadura inicial (para saber cuánto cambia al subir características).
-// La armadura pesada no suma la Destreza; la media, como mucho +2.
-function caCalculada(hoja, cid, cars, n) {
-  const md = k => modDe(cars[k] ?? 10);
-  const arm = ARMADURAS_INICIALES.find(a => a.re.test(norm((hoja.equipo || [])[0] || '')));
-  if (arm) return arm.base + (arm.maxDes ? Math.min(md('des'), arm.maxDes) : 0);
-  if (cid === 'barbaro') return 10 + md('des') + md('con');
-  if (cid === 'monje') return 10 + md('des') + md('sab');
-  if (cid === 'hechicero' && n >= 3) return 10 + md('des') + md('car');
-  return 10 + md('des');
+// ---- Armadura y escudo que lleva puestos (SRD 5.2.1, pág. 100, tabla «Armaduras») ----
+const ARMADURAS = [
+  { id: 'acolchada', nombre: 'Armadura acolchada', tipo: 'ligera', base: 11, sigilo: true },
+  { id: 'cuero', nombre: 'Armadura de cuero', tipo: 'ligera', base: 11 },
+  { id: 'cuero-tachonado', nombre: 'Armadura de cuero tachonado', tipo: 'ligera', base: 12 },
+  { id: 'pieles', nombre: 'Armadura de pieles', tipo: 'media', base: 12 },
+  { id: 'camisa-de-malla', nombre: 'Camisa de malla', tipo: 'media', base: 13 },
+  { id: 'cota-de-escamas', nombre: 'Cota de escamas', tipo: 'media', base: 14, sigilo: true },
+  { id: 'coraza', nombre: 'Coraza', tipo: 'media', base: 14 },
+  { id: 'media-armadura', nombre: 'Media armadura', tipo: 'media', base: 15, sigilo: true },
+  { id: 'cota-guarnecida', nombre: 'Cota guarnecida', tipo: 'pesada', base: 14, sigilo: true },
+  { id: 'cota-de-malla', nombre: 'Cota de malla', tipo: 'pesada', base: 16, fue: 13, sigilo: true },
+  { id: 'bandas', nombre: 'Armadura de bandas', tipo: 'pesada', base: 17, fue: 15, sigilo: true },
+  { id: 'placas', nombre: 'Armadura de placas', tipo: 'pesada', base: 18, fue: 15, sigilo: true }
+];
+const TIPOS_ARMADURA = [['ligera', 'Armaduras ligeras (1 minuto para ponérsela o quitársela)'], ['media', 'Armaduras medias (5 minutos para ponérsela, 1 para quitársela)'], ['pesada', 'Armaduras pesadas (10 minutos para ponérsela, 5 para quitársela)']];
+const armaduraInicial = txt => (ARMADURAS_INICIALES.find(a => a.re.test(norm(txt || ''))) || {}).id || null;
+const escudoInicial = txt => /\bescudo\b/.test(norm(txt || ''));
+// ¿Tiene entrenamiento con ese tipo de armadura o con escudos? (clase + Protector/Guardián, ya incluidos en hoja.armaduras)
+const entrenadoArmadura = (texto, tipo) => new RegExp({ ligera: 'ligera', media: 'media', pesada: 'pesada', escudo: 'escudo' }[tipo]).test(norm(texto || ''));
+// Personajes creados antes de esta versión: se deduce su armadura del equipo inicial y se guarda como bonificador
+// extra la diferencia con la CA que ya tenían (así no se pierde lo que se hubiera ajustado a mano)
+function equipoPJ(pj) {
+  const h = pj.hoja; if (!h || h.armadura !== undefined) return h;
+  const eq = (h.equipo || [])[0] || '';
+  Object.assign(h, { armadura: armaduraInicial(eq), escudo: escudoInicial(eq), armaduraMago: false, caExtra: 0 });
+  h.equipoActual ??= (h.equipo || []).join('\n');
+  const calc = caPJ(pj), arm = ARMADURAS.find(a => a.id === h.armadura), md = modDe(pj.des ?? 10);
+  // Antes, con armadura pesada se restaba la Destreza negativa por error: esa diferencia no es un ajuste
+  const fallo = arm && arm.tipo === 'pesada' && md < 0 && pj.ca === calc.total + md;
+  h.caExtra = pj.ca == null || fallo ? 0 : pj.ca - calc.total;
+  return h;
+}
+// CA con lo que lleva puesto. o.cars / o.n / o.dotes permiten calcularla con otras puntuaciones, nivel o dotes (subida de nivel)
+function caPJ(pj, o = {}) {
+  const h = pj.hoja, c = clasePJ(pj) || {}, cars = o.cars || pj, n = o.n || pj.nivel || 1;
+  const dotes = o.dotes || (h.dotes || []).map(d => d.id), md = k => modDe(cars[k] ?? 10);
+  const arm = ARMADURAS.find(a => a.id === h.armadura), partes = [], avisos = [], notas = [];
+  const textoArm = h.armaduras || c.armaduras || '';
+  let total;
+  if (arm) {
+    const des = arm.tipo === 'ligera' ? md('des') : arm.tipo === 'media' ? Math.min(2, md('des')) : 0;
+    total = arm.base + des;
+    partes.push(`${arm.nombre} ${arm.base}${arm.tipo === 'pesada' ? '' : ` ${signo(des)} Des${arm.tipo === 'media' ? ' (máx. +2)' : ''}`}`);
+    if (!entrenadoArmadura(textoArm, arm.tipo)) avisos.push(`No tiene entrenamiento con armaduras ${arm.tipo}s: desventaja en las pruebas con d20 de Fuerza o Destreza y no puede lanzar conjuros.`);
+    if (arm.fue && (cars.fue ?? 10) < arm.fue) avisos.push(`Necesita Fuerza ${arm.fue} para esta armadura: su velocidad baja 3 m.`);
+    if (arm.sigilo) notas.push('Con esta armadura tiene desventaja en las pruebas de Destreza (Sigilo).');
+  } else {
+    const ops = [[10 + md('des'), 'Sin armadura: 10 ' + signo(md('des')) + ' Des']];
+    if (c.id === 'barbaro') ops.push([10 + md('des') + md('con'), `Defensa sin armadura: 10 ${signo(md('des'))} Des ${signo(md('con'))} Con`]);
+    if (c.id === 'monje' && !h.escudo) ops.push([10 + md('des') + md('sab'), `Defensa sin armadura: 10 ${signo(md('des'))} Des ${signo(md('sab'))} Sab`]);
+    if (c.id === 'hechicero' && n >= 3) ops.push([10 + md('des') + md('car'), `Resistencia dracónica: 10 ${signo(md('des'))} Des ${signo(md('car'))} Car`]);
+    if (h.armaduraMago) ops.push([13 + md('des'), `Armadura de mago: 13 ${signo(md('des'))} Des`]);
+    const mejor = ops.reduce((a, b) => b[0] > a[0] ? b : a);
+    total = mejor[0]; partes.push(mejor[1]);
+  }
+  if (c.id === 'monje' && (arm || h.escudo)) avisos.push(`Con ${arm ? 'armadura' : 'escudo'} el monje pierde Defensa sin armadura, Artes marciales y Movimiento sin armadura.`);
+  if (c.id === 'barbaro' && arm && arm.tipo === 'pesada') avisos.push('Con armadura pesada el bárbaro no puede entrar en furia (y la furia termina si se la pone).');
+  if (h.escudo) {
+    if (entrenadoArmadura(textoArm, 'escudo')) { total += 2; partes.push('escudo +2'); }
+    else avisos.push('No tiene entrenamiento con escudos: el escudo no le suma +2 a la CA.');
+  }
+  if (arm && dotes.includes('defensa')) { total += 1; partes.push('Defensa +1'); }
+  if (h.caExtra) { total += h.caExtra; partes.push(`otros ${signo(h.caExtra)}`); }
+  return { total, partes, avisos, notas, arm };
+}
+// Velocidad con lo que lleva puesto: rasgos de clase que dependen de la armadura y Fuerza mínima de la armadura pesada
+function velocidadPJ(pj, velBase) {
+  const h = pj.hoja, c = clasePJ(pj), n = pj.nivel || 1, vx = velocidadExtra(c, n), arm = ARMADURAS.find(a => a.id === h.armadura);
+  const aplica = vx.m && (c.id === 'monje' ? !arm && !h.escudo : !(arm && arm.tipo === 'pesada'));
+  const lenta = arm && arm.fue && (pj.fue ?? 10) < arm.fue;
+  return { total: velBase + (aplica ? vx.m : 0) - (lenta ? 3 : 0), vx, aplica, lenta, arm };
 }
 // Bonificador extra a habilidades: Taumaturgo / Naturalista (Sabiduría, mínimo +1)
 const notaExtraHab = (orden, habs) => { const l = habs.filter(x => x.extra); return l.length ? ` ${esc(orden)}: ya incluye +${l[0].extra} (Sabiduría) en ${l.map(x => esc(x.nombre)).join(' y ')}.` : ''; };
@@ -2314,6 +2377,22 @@ function wzHerramientas() {
   if (w.especie === 'humano' && w.doteHumano === 'habilidoso') (w.herrDote || []).forEach(n => add(n, 'dote'));
   return m;
 }
+// Herramientas que llegan a la vez por la clase y por el trasfondo: solo cuentan una vez (el SRD no da otra a cambio)
+function wzHerrRepetidas() {
+  const w = WZ(), c = wzClase(), t = wzTras(), m = new Map();
+  const add = (n, o) => { if (!n) return; const k = norm(n); if (!m.has(k)) m.set(k, { nombre: n, origenes: [] }); m.get(k).origenes.push(o); };
+  if (c && c.herramientas) { if (eleccionHerr(c.herramientas)) (w.herrClase || []).forEach(n => add(n, { de: 'clase', nombre: c.nombre, elegida: true })); else add(herrFija(c.herramientas), { de: 'clase', nombre: c.nombre }); }
+  if (t && t.herramienta) { if (eleccionHerr(t.herramienta)) (w.herrTras || []).forEach(n => add(n, { de: 'trasfondo', nombre: t.nombre, elegida: true })); else add(herrFija(t.herramienta), { de: 'trasfondo', nombre: t.nombre }); }
+  return [...m.values()].filter(x => x.origenes.length > 1);
+}
+function htmlAvisoHerr() {
+  const paso = WZ().paso;
+  return wzHerrRepetidas().map(r => {
+    const cl = r.origenes.find(o => o.de === 'clase'), tr = r.origenes.find(o => o.de === 'trasfondo');
+    return `<div class="aviso malo"><span><b>${esc(r.nombre)}</b> está repetida: la da su clase (<b>${esc(cl.nombre)}</b>${cl.elegida ? ', la elegiste tú' : ''}) y su trasfondo (<b>${esc(tr.nombre)}</b>). Solo aparecerá una vez y no se cambia por otra herramienta. Si lo prefieres, cambia la clase${cl.elegida ? ' (o la herramienta que elegiste en ella)' : ''} o el trasfondo.
+      <span class="botonera-mini"><button class="btn mini" data-a="wzIr" data-n="0">Cambiar clase</button>${paso > 1 ? '<button class="btn mini" data-a="wzIr" data-n="1">Cambiar trasfondo</button>' : ''}</span></span></div>`;
+  }).join('');
+}
 const GRUPOS_HERR = [['Herramientas de artesano', h => h.categoria === 'artesano'], ['Instrumentos musicales', h => h.grupo === 'Instrumento musical'], ['Juegos', h => h.grupo === 'Juego'], ['Otras herramientas', h => h.categoria === 'otra' && !h.grupo]];
 // Chips para elegir herramientas (agrupadas). «ocupada» = ya la tiene por otro lado
 function htmlElegirHerr(k, filtro, elegidas, ocupada) {
@@ -2339,10 +2418,10 @@ const wzLinaje = () => { const e = wzEsp(); return e && e.linaje ? e.linaje.opci
 const doteSRD = id => CR.dotes.find(d => d.id === id);
 // Armaduras que aparecen en el equipo inicial de las clases (SRD 5.2.1, tabla «Armaduras»)
 const ARMADURAS_INICIALES = [
-  { re: /cuero tachonado/, nombre: 'armadura de cuero tachonado', base: 12, maxDes: 99 },
-  { re: /armadura de cuero/, nombre: 'armadura de cuero', base: 11, maxDes: 99 },
-  { re: /camisa de malla/, nombre: 'camisa de malla', base: 13, maxDes: 2 },
-  { re: /cota de malla/, nombre: 'cota de malla', base: 16, maxDes: 0 }
+  { re: /cuero tachonado/, id: 'cuero-tachonado' },
+  { re: /armadura de cuero/, id: 'cuero' },
+  { re: /camisa de malla/, id: 'camisa-de-malla' },
+  { re: /cota de malla/, id: 'cota-de-malla' }
 ];
 // Resumen corto de cada linaje (se ve antes de elegirlo)
 const RESUMEN_LINAJE = {
@@ -2438,6 +2517,8 @@ function wzFalta(p) {
     const repDote = w.doteHumano === 'habilidoso' ? w.habDote.filter(h => origen(h) !== 'dote') : [];
     if (repDote.length) return `Habilidoso: ${repDote.join(' y ')} ya la tiene por otro lado: quítala y elige otra`;
     if (e.id === 'humano' && !w.doteHumano) return 'Elige la dote de origen (Versátil)';
+    const tr = wzTras(), dh = w.doteHumano && doteSRD(w.doteHumano);
+    if (e.id === 'humano' && tr && dh && dh.id === tr.doteId && !dh.repetible) return `Versátil: ${dh.nombre} ya la da su trasfondo y no se puede tener dos veces. Elige otra dote`;
     if (e.id === 'humano' && w.doteHumano === 'habilidoso' && w.habDote.length + (w.herrDote || []).length !== 3) return 'Habilidoso: elige 3 entre habilidades y herramientas';
   }
   if (p === 3 && !wzBase()) return 'Escribe las 6 tiradas (cada una entre 3 y 18)';
@@ -2467,6 +2548,7 @@ function wzPasoClase() {
       <h3 class="sub-tit">Elige ${n} habilidades <span class="cuenta">${w.habClase.length}/${n}</span></h3>
       <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>
       ${(() => { const eh = eleccionHerr(c.herramientas); return eh ? `<h3 class="sub-tit">Herramientas: ${eh.txt.toLowerCase()} <span class="cuenta">${(w.herrClase || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrClase', eh.filtro, w.herrClase || [], () => false)}` : ''; })()}
+      ${htmlAvisoHerr()}
       ${ORDENES[c.id] ? `<h3 class="sub-tit">${ORDENES[c.id].rasgo}</h3><p class="nota" style="margin-top:0">Elige una de las dos funciones. Toca una para leerla entera.</p>
         <div class="wz-ops">${ORDENES[c.id].ops.map(([id, nom, res]) => { const on = w.ordenClase === id; return `<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="ordenClase" data-v="${id}" aria-pressed="${on}"><b>${nom}</b><small>${res}</small>${on ? `<div class="wz-op-det">${detalleOrden(c, nom)}</div>` : ''}</button>`; }).join('')}</div>` : ''}
       ${nMaestria(c.id, 1) ? `<h3 class="sub-tit">Maestría con armas: elige ${nMaestria(c.id, 1)} tipos de armas <span class="cuenta">${(w.maestria || []).length}/${nMaestria(c.id, 1)}</span></h3>
@@ -2493,6 +2575,7 @@ function wzPasoTrasfondo() {
       <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p><p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
       ${(() => { const eh = eleccionHerr(t.herramienta); if (!eh) return ''; const deClase = new Set((w.herrClase || []).map(norm)); return `<h3 class="sub-tit">${eh.txt} <span class="cuenta">${(w.herrTras || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrTras', eh.filtro, w.herrTras || [], n => deClase.has(norm(n)))}`; })()}
       ${repetidas.length ? `<div class="aviso malo"><span><b>${repetidas.map(esc).join(' y ')}</b> ya la${repetidas.length > 1 ? 's' : ''} elegiste en la clase. Vuelve al paso 1 y elige otra${repetidas.length > 1 ? 's' : ''} en su lugar.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}
+      ${htmlAvisoHerr()}
       <h3 class="sub-tit">Dote: ${esc(t.dote)}</h3>${d ? `<div class="wz-det">${d.html}</div>` : ''}
       ${t.doteId === 'iniciado-en-la-magia' ? `<p class="nota">Los 2 trucos y el conjuro de nivel 1 de ${esc(t.doteNota)} los elegirás en el paso «Conjuros».</p>` : ''}
       <h3 class="sub-tit">Equipo</h3>
@@ -2522,7 +2605,9 @@ function wzPasoEspecie() {
       ${SENTIDOS_AGUDOS.every(ocupada) ? `<div class="aviso malo"><span>Ya es competente en las tres por su clase o su trasfondo. Cambia una de las habilidades de la clase para no perder este atributo.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}`;
     if (e.id === 'humano') {
       html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre) && w.habEspecie !== h.nombre)).join('')}</div>
-        <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => wzOp('wzSet', 'doteHumano', d.id, w.doteHumano === d.id, d.nombre + (d.id === 'habilidoso' ? ' (recomendada)' : ''), '')).join('')}</div>`;
+        <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => {
+          const deTras = wzTras() && wzTras().doteId === d.id, no = deTras && !d.repetible;
+          return `<button class="wz-op${w.doteHumano === d.id ? ' on' : ''}" data-a="wzSet" data-k="doteHumano" data-v="${d.id}" aria-pressed="${w.doteHumano === d.id}" ${no && w.doteHumano !== d.id ? 'disabled' : ''}><b>${esc(d.nombre)}${d.id === 'habilidoso' ? ' (recomendada)' : ''}</b>${deTras ? `<small>${no ? 'Ya la da su trasfondo: no se puede tener dos veces' : 'Ya la da su trasfondo: se puede repetir con otra lista de conjuros'}</small>` : ''}</button>`; }).join('')}</div>`;
       if (w.doteHumano === 'habilidoso') {
         const herrD = w.herrDote || [], total = w.habDote.length + herrD.length;
         const yaHerr = wzHerramientas(), ocupadaH = n => yaHerr.has(norm(n)) && yaHerr.get(norm(n)).origen !== 'dote';
@@ -2737,15 +2822,6 @@ function wzHoja() {
   const w = WZ(), c = wzClase(), t = wzTras(), e = wzEsp(), l = wzLinaje(), f = wzFinal();
   const md = k => modDe(f[k]), bc = 2;
   const dotes = wzDotes(), alerta = dotes.some(d => d.id === 'alerta');
-  let ca = 10 + md('des'), caNota = 'sin armadura (10 + Des)';
-  if (c.id === 'barbaro') { ca = 10 + md('des') + md('con'); caNota = 'Defensa sin armadura (Des + Con)'; }
-  if (c.id === 'monje') { ca = 10 + md('des') + md('sab'); caNota = 'Defensa sin armadura (Des + Sab)'; }
-  // Armadura y escudo del equipo inicial de la clase (si se eligió el paquete con equipo)
-  const eqClase = norm(c.equipoOpciones[w.equipoClase] || '');
-  const arm = ARMADURAS_INICIALES.find(a => a.re.test(eqClase));
-  if (arm) { ca = arm.base + (arm.maxDes ? Math.min(md('des'), arm.maxDes) : 0); caNota = arm.nombre + (arm.maxDes ? ` (${arm.base} + Des${arm.maxDes < 9 ? ', máx. +' + arm.maxDes : ''})` : ` (${arm.base})`); }
-  if (/\bescudo\b/.test(eqClase)) { ca += 2; caNota += ' + escudo (+2)'; }
-  if (arm && dotes.some(d => d.id === 'defensa')) { ca += 1; caNota += ' + Defensa (+1)'; }
   const pg = Math.max(1, dadoGolpe(c) + md('con') + (e.id === 'enano' ? 1 : 0));
   const comp = wzCompetencias();
   const pericia = new Set((c.id === 'picaro' ? wzPericia() : []).map(norm));
@@ -2772,7 +2848,12 @@ function wzHoja() {
   if (w.ordenClase === 'protector') { armaduras += '; armaduras pesadas (Protector)'; armas += '; armas marciales (Protector)'; }
   if (w.ordenClase === 'guardian') { armaduras += '; armaduras medias (Guardián)'; armas += '; armas marciales (Guardián)'; }
   const magia = wzMagiaDotes().filter(m => m.lista && m.apt);
-  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, herramientas, conjuros, magia, orden, armaduras, armas, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
+  // Armadura y escudo del equipo inicial de la clase (si se eligió el paquete con equipo): se calcula igual que en la hoja
+  const eqClase = c.equipoOpciones[w.equipoClase] || '';
+  const armadura = armaduraInicial(eqClase), escudo = escudoInicial(eqClase);
+  const cal = caPJ({ ...f, nivel: 1, hoja: { clase: c.id, armadura, escudo, caExtra: 0, armaduras, dotes } });
+  const ca = cal.total, caNota = cal.partes.join(' + ');
+  return { c, t, e, l, f, bc, ca, caNota, armadura, escudo, pg, alerta, dotes, habilidades, herramientas, conjuros, magia, orden, armaduras, armas, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
 }
 function wzPasoResumen() {
   const w = WZ(), h = wzHoja();
@@ -2781,8 +2862,9 @@ function wzPasoResumen() {
       <h2 style="margin:0 0 2px;font-size:1.15rem">${esc(w.nombre)}</h2>
       <p class="nota" style="margin:0 0 8px">${esc(h.c.nombre)} de nivel 1 · ${esc(h.especieTxt)} · ${esc(h.t.nombre)} · ${esc(h.alin.nombre)}</p>
       <div class="wz-stats"><div><span>CA</span><b>${h.ca}</b></div><div><span>PG</span><b>${h.pg}</b></div><div><span>Iniciativa</span><b>${signo(modDe(h.f.des) + (h.alerta ? h.bc : 0))}</b></div><div><span>Velocidad</span><b>${String(h.velocidad).replace('.', ',')} m</b></div><div><span>BC</span><b>${signo(h.bc)}</b></div><div><span>Perc. pasiva</span><b>${h.pasiva}</b></div></div>
-      <p class="nota" style="margin:4px 0 0">CA: ${h.caNota}. PG = ${dadoGolpe(h.c)} (dado de golpe) ${signo(modDe(h.f.con))} (Con)${h.e.id === 'enano' ? ' +1 (Aguante enano)' : ''}.</p>
+      <p class="nota" style="margin:4px 0 0">CA: ${esc(h.caNota)}. PG = ${dadoGolpe(h.c)} (dado de golpe) ${signo(modDe(h.f.con))} (Con)${h.e.id === 'enano' ? ' +1 (Aguante enano)' : ''}.</p>
     </div>
+    ${htmlAvisoHerr()}
     <h3 class="sub-tit">Características y salvaciones</h3>
     <div class="cars-pj">${CARS_PJ.map(([k, n]) => `<div class="car-pj${h.salv.includes(k) ? ' comp' : ''}"><span>${n}</span><b class="wz-pt">${h.f[k]}</b><b>${signo(modDe(h.f[k]))}</b><small>Salv. ${signo(modDe(h.f[k]) + (h.salv.includes(k) ? h.bc : 0))}${h.salv.includes(k) ? ' ●' : ''}</small></div>`).join('')}</div>
     <p class="nota">● Competencia en la salvación (por su clase).</p>
@@ -2933,6 +3015,7 @@ A.wzCrear = () => {
     pasiva: h.pasiva, notas, conjuros: h.conjuros.map(c => c.id),
     hoja: { clase: h.c.id, trasfondo: h.t.id, especie: h.e.id, linaje: w.linaje, aptitud: w.aptitud, tamano: h.tamano, alineamiento: w.alineamiento,
       ordenClase: w.ordenClase || null, maestria: (w.maestria || []).slice(), invocaciones: (w.invoc || []).slice(), armaduras: h.armaduras, armas: h.armas,
+      armadura: h.armadura, escudo: h.escudo, armaduraMago: false, caExtra: 0, equipoActual: h.equipo.join('\n'), grimorio: [...((w.conj || {}).grimT || []), ...((w.conj || {}).grimR || [])],
       habilidades: comp, pericia: h.habilidades.filter(x => x.pericia).map(x => x.nombre), dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramientas: h.herramientas,
       conj: JSON.parse(JSON.stringify(w.conj || {})), magia: h.magia.map(m => ({ origen: m.origen, lista: m.lista, apt: m.apt, trucos: m.est.T, conjuros: m.est.C })), conjEspecie: wzConjFijos(), conjSiempre: wzConjClaseFijos(),
       tiradas: w.tiradas.map(Number), orden: wzOrden(), bonus: wzBonus(), descripcion: w.descripcion.trim(), personalidad: w.personalidad.trim(), creado: Date.now() }
@@ -2990,7 +3073,11 @@ VISTAS.hoja = id => {
   const l = e && e.linaje && e.linaje.opciones.find(o => o.id === h.linaje);
   const alin = CR.alineamientos.find(a => a.abr === h.alineamiento);
   const velBase = (l && l.velocidad) || (e && e.velocidad) || 9, vis = (l && l.vision) || (e && e.vision) || 0;
-  const vx = velocidadExtra(c, n), vel = velBase + vx.m;
+  equipoPJ(pj);
+  const cal = caPJ(pj), v = velocidadPJ(pj, velBase), vx = v.vx, vel = v.total;
+  if (pj.ca !== cal.total) { pj.ca = cal.total; sincronizarPJ(pj, 'ca'); guardar(); }
+  const opArm = `<option value="">Sin armadura</option>${TIPOS_ARMADURA.map(([tipo, tit]) => `<optgroup label="${tit}">${ARMADURAS.filter(a => a.tipo === tipo).map(a => `<option value="${a.id}" ${h.armadura === a.id ? 'selected' : ''}>${a.nombre} (CA ${a.base}${tipo === 'ligera' ? ' + Des' : tipo === 'media' ? ' + Des máx. 2' : ''}${a.fue ? ', Fue ' + a.fue : ''})${entrenadoArmadura(h.armaduras || c.armaduras, tipo) ? '' : ' · sin entrenamiento'}</option>`).join('')}</optgroup>`).join('')}`;
+  const sabeMago = (pj.conjuros || []).includes('armadura-de-mago');
   const salv = pj.salvComp || [];
   const habs = habilidadesPJ(pj);
   const ini = (pj.iniDes !== false ? modDe(pj.des) : 0) + (pj.iniBC ? bc : 0) + (pj.iniExtra || 0);
@@ -3002,9 +3089,19 @@ VISTAS.hoja = id => {
     <div class="wz-det wz-resumen">
       <p class="nota" style="margin:0 0 8px">${esc(c.nombre)} de nivel ${n}${h.subclase ? ` (${esc(h.subclase)})` : ''} · ${esc(e ? e.nombre : '')}${l ? ` (${esc(l.nombre.replace(/\s*\(.*\)$/, ''))})` : ''} · ${esc(t ? t.nombre : '')}${alin ? ' · ' + esc(alin.nombre) : ''}${pj.jugador ? ` · jugado por ${esc(pj.jugador)}` : ''}</p>
       <div class="wz-stats"><div><span>CA</span><b>${pj.ca ?? '—'}</b></div><div><span>PG máx.</span><b>${pj.pgMax ?? '—'}</b></div><div><span>Iniciativa</span><b>${signo(ini)}</b></div>
-        <div><span>Velocidad</span><b>${fmtM(vel)}${vx.m ? '*' : ''}</b></div><div><span>BC</span><b>${signo(bc)}</b></div><div><span>Perc. pasiva</span><b>${pasivaPJ(pj)}</b></div></div>
+        <div><span>Velocidad</span><b>${fmtM(vel)}${vx.m || v.lenta ? '*' : ''}</b></div><div><span>BC</span><b>${signo(bc)}</b></div><div><span>Perc. pasiva</span><b>${pasivaPJ(pj)}</b></div></div>
       ${vis || h.tamano ? `<p class="nota" style="margin:6px 0 0">${h.tamano ? 'Tamaño ' + esc(h.tamano) : ''}${vis ? ` · visión en la oscuridad ${vis} m` : ''}</p>` : ''}
-      ${vx.m ? `<p class="nota" style="margin:4px 0 0">Velocidad: ${fmtM(velBase)} + ${fmtM(vx.m)} de <b>${vx.rasgo}</b> ${vx.cond} (si no, ${fmtM(velBase)}).</p>` : ''}
+      ${vx.m ? `<p class="nota" style="margin:4px 0 0">Velocidad: ${fmtM(velBase)}${v.aplica ? ` + ${fmtM(vx.m)} de <b>${vx.rasgo}</b>, porque ahora ${vx.cond.replace(/^si /, '')}` : `. <b>${vx.rasgo}</b> (+${fmtM(vx.m)}) no se aplica ahora: solo ${vx.cond}`}${v.lenta ? '; −3 m por la Fuerza que pide su armadura' : ''}.</p>` : v.lenta ? `<p class="nota" style="margin:4px 0 0">Velocidad: ${fmtM(velBase)} − 3 m por la Fuerza que pide su armadura.</p>` : ''}
+    </div>
+    <h3 class="sub-tit">Armadura y CA</h3>
+    <div class="wz-det">
+      <p style="margin:0 0 8px">CA <b>${cal.total}</b> = ${cal.partes.map(esc).join(' + ')}</p>
+      <label class="campo"><span>Armadura que lleva puesta</span><select data-ch="hojaArmadura" data-id="${pj.id}">${opArm}</select></label>
+      <label class="check"><input type="checkbox" data-ch="hojaEscudo" data-id="${pj.id}" ${h.escudo ? 'checked' : ''}><span>Lleva escudo (+2; ponérselo o quitárselo es una acción de utilizar)</span></label>
+      ${sabeMago && !cal.arm ? `<label class="check"><input type="checkbox" data-ch="hojaMago" data-id="${pj.id}" ${h.armaduraMago ? 'checked' : ''}><span>Armadura de mago activa (13 + Des; dura 8 horas)</span></label>` : ''}
+      <label class="campo"><span>Otros bonos a la CA (objetos mágicos, etc.)</span><input class="cant" type="number" inputmode="numeric" data-ch="hojaCAExtra" data-id="${pj.id}" value="${h.caExtra || 0}"></label>
+      ${cal.avisos.map(a => `<div class="aviso malo"><span>${esc(a)}</span></div>`).join('')}${cal.notas.map(a => `<p class="nota" style="margin:6px 0 0">${esc(a)}</p>`).join('')}
+      <p class="nota" style="margin:6px 0 0">Si se quita la armadura, la pierde o se pone otra, cámbiala aquí: la CA se recalcula y se actualiza en los encuentros.</p>
     </div>
     <h3 class="sub-tit">Características y salvaciones</h3>
     <div class="cars-pj">${CARS_PJ.map(([k, nom]) => `<div class="car-pj${salv.includes(k) ? ' comp' : ''}"><span>${nom}</span><b class="wz-pt">${pj[k] ?? 10}</b><b>${signo(modDe(pj[k]))}</b><small>Salv. ${signo(modDe(pj[k]) + (salv.includes(k) ? bc : 0))}${salv.includes(k) ? ' ●' : ''}</small></div>`).join('')}</div>
@@ -3027,6 +3124,7 @@ VISTAS.hoja = id => {
     ${conj.length ? `<h3 class="sub-tit">Conjuros</h3><div class="lista">${conj.map(x => { const marca = [(h.conjSiempre || []).includes(x.id) && 'siempre preparado', (h.arcanum || []).includes(x.id) && 'arcanum místico', (h.maestriaConj || []).includes(x.id) && 'maestría sobre conjuros', (h.caracteristicos || []).includes(x.id) && 'característico'].filter(Boolean);
       return `<div class="fila"><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}${marca.length ? ' · <b>' + marca.join(', ') + '</b>' : ''}</div></div></div>`; }).join('')}</div>` : ''}
     <h3 class="sub-tit">Equipo y personaje</h3>
+    <label class="campo"><span>Equipo que lleva ahora (escríbelo y cámbialo cuando quieras)</span><textarea data-in="hojaEquipo" data-id="${pj.id}" rows="5">${esc(h.equipoActual ?? (h.equipo || []).join('\n'))}</textarea></label>
     <div class="wz-det">${fila('Equipo inicial', esc((h.equipo || []).join(' + ')))}${fila('Descripción', esc(h.descripcion))}${fila('Personalidad e historia', esc(h.personalidad))}</div>
     ${(h.niveles || []).length ? `<h3 class="sub-tit">Historial de niveles</h3><div class="wz-det">${h.niveles.map(x => `<p><b>Nivel ${x.nivel}:</b> ${esc(x.resumen)}</p>`).join('')}</div>` : ''}`;
   return {
@@ -3123,17 +3221,25 @@ function suListaConjNiveles(k, filtro, elegidos, n, conocidos, nivelAbierto) {
 // Grupos de conjuros que elige al subir de nivel. «libro» = se eligen de entre los que ya tiene.
 // nEf = cuántos puede elegir de verdad (si ya conoce casi toda la lista, no se le piden más de los que quedan)
 function suGrupos(pj) {
-  const s = SU(), p = planSubida(pj), c = p.c, g = [];
+  const s = SU(), p = planSubida(pj), c = p.c, g = [], q = suQ();
   const libro = x => (pj.conjuros || []).includes(x.id);
-  if (p.trucos) g.push({ k: 'nTrucos', titulo: `Trucos nuevos`, n: p.trucos, filtro: x => x.nivel === 0 && enListaDe(x, c.id), abierto: 0 });
-  if (p.conjuros) {
+  const porCambio = n => n ? ` Incluye ${n === 1 ? '1 más por el que quita' : n + ' más por los que quita'}.` : '';
+  const alt = { paladin: 'clerigo', explorador: 'druida' }[c.id];
+  const nT = p.trucos + (alt ? 0 : q.trucos.length);
+  if (nT) g.push({ k: 'nTrucos', titulo: p.trucos ? 'Trucos nuevos' : 'Truco nuevo (por el que quita)', n: nT, filtro: x => x.nivel === 0 && enListaDe(x, c.id), abierto: 0, nota: p.trucos ? porCambio(q.trucos.length).trim() : '' });
+  if (alt && q.trucos.length) g.push({ k: 'nTrucosAlt', titulo: `Truco de ${alt === 'clerigo' ? 'clérigo' : 'druida'} nuevo (por el que quita)`, n: q.trucos.length, filtro: x => x.nivel === 0 && enListaDe(x, alt), abierto: 0 });
+  const nC = p.conjuros + q.conj.length;
+  if (nC) {
     const listas = c.id === 'bardo' && p.n >= 10 ? ['bardo', 'clerigo', 'druida', 'mago'] : [c.id];
-    g.push({ k: 'nConj', titulo: c.id === 'mago' ? 'Conjuros para su libro' : 'Conjuros preparados nuevos', n: p.conjuros, abierto: p.nivelConj,
+    g.push({ k: 'nConj', titulo: c.id === 'mago' ? 'Conjuros para su libro' : p.conjuros ? 'Conjuros preparados nuevos' : (q.conj.length === 1 ? 'Conjuro nuevo (por el que quita)' : 'Conjuros nuevos (por los que quita)'), n: nC, abierto: p.nivelConj,
       filtro: x => x.nivel >= 1 && x.nivel <= p.nivelConj && listas.some(l => enListaDe(x, l)),
       nota: (c.id === 'mago' ? `Al subir de nivel añade 2 conjuros de mago a su libro (${p.nivelConj > 1 ? `de nivel 1 a ${p.nivelConj}` : 'de nivel 1'}).`
-        : `Su número de conjuros preparados sube de ${TABLA(c.id, 'preparados', p.n - 1)} a ${TABLA(c.id, 'preparados', p.n)}. ${p.nivelConj > 1 ? `Pueden ser de nivel 1 a ${p.nivelConj}` : 'Deben ser de nivel 1'}.`)
+        : p.conjuros ? `Su número de conjuros preparados sube de ${TABLA(c.id, 'preparados', p.n - 1)} a ${TABLA(c.id, 'preparados', p.n)}. ${p.nivelConj > 1 ? `Pueden ser de nivel 1 a ${p.nivelConj}` : 'Deben ser de nivel 1'}.`
+        : `${p.nivelConj > 1 ? `De nivel 1 a ${p.nivelConj}` : 'De nivel 1'}.`)
+        + (p.conjuros ? porCambio(q.conj.length) : '')
         + (listas.length > 1 ? ' Por <b>Secretos mágicos</b> puede elegirlos de las listas de bardo, clérigo, druida y mago.' : '') });
   }
+  if (q.arcanum.length) { const nv = (CONJ.get(q.arcanum[0]) || {}).nivel; g.push({ k: 'cArc', titulo: `Arcanum místico nuevo de nivel ${nv} (por el que quita)`, n: 1, abierto: nv, filtro: x => x.nivel === nv && enListaDe(x, 'brujo') }); }
   if ((s.nInvoc || []).includes('pacto-del-grimorio')) GRIMORIO.forEach(gr => g.push({ k: gr.k, titulo: gr.titulo, n: gr.n, filtro: gr.filtro, abierto: -1 }));
   if (p.arcanum) g.push({ k: 'nArc', titulo: `Arcanum místico: 1 conjuro de brujo de nivel ${p.arcanum}`, n: 1, abierto: p.arcanum, filtro: x => x.nivel === p.arcanum && enListaDe(x, 'brujo'), nota: 'Lo lanza una vez sin gastar espacio de conjuro y lo recupera tras un descanso largo.' });
   if (p.descub) g.push({ k: 'nDesc', titulo: 'Descubrimientos mágicos: 2 conjuros de clérigo, druida o mago', n: 2, abierto: 0, filtro: x => x.nivel <= p.nivelConj && ['clerigo', 'druida', 'mago'].some(l => enListaDe(x, l)), nota: `Pueden ser trucos o conjuros de nivel 1 a ${p.nivelConj}. Siempre los tiene preparados.` });
@@ -3155,7 +3261,7 @@ const SU = () => E.subidaPJ;
 A.subirNivel = el => {
   const pj = pjPorId(el.dataset.id); if (!pj || !clasePJ(pj)) return;
   if (!E.subidaPJ || E.subidaPJ.pjId !== pj.id || E.subidaPJ.nivel !== (pj.nivel || 1) + 1)
-    E.subidaPJ = { pjId: pj.id, nivel: (pj.nivel || 1) + 1, pgModo: 'media', pgTirada: '', ranuras: { mejora: ranura(), don: { ...ranura(), tipo: 'dote' }, estilo: { ...ranura(), tipo: 'dote' } }, pericia: [], idiomas: [], defensaCA: true };
+    E.subidaPJ = { pjId: pj.id, nivel: (pj.nivel || 1) + 1, pgModo: 'media', pgTirada: '', ranuras: { mejora: ranura(), don: { ...ranura(), tipo: 'dote' }, estilo: { ...ranura(), tipo: 'dote' } }, pericia: [], idiomas: [] };
   guardar(); navegar('#/subir/' + pj.id);
 };
 // Puntuaciones tras aplicar las elecciones de esta subida
@@ -3228,7 +3334,7 @@ function htmlExtrasDote(pj, s, r, cars) {
 }
 function htmlElegirDote(pj, s, r, filtro, cars) {
   const p = planSubida(pj), tomadas = new Set((pj.hoja.dotes || []).map(d => d.id));
-  const otras = Object.entries(SU().ranuras).filter(([k]) => k !== s && p[k]).map(([, x]) => x.dote).filter(Boolean);
+  const otras = [...Object.entries(SU().ranuras).filter(([k]) => k !== s && p[k]).map(([, x]) => x.dote).filter(Boolean), ...(suQ().estilo.length ? SU().nEstilo || [] : [])];
   // Iniciado en la magia se puede repetir, pero con otra lista: no se ofrece si ya usó las 3 (contando la otra ranura de este nivel)
   const listasLibres = LISTAS_MAGIA.length - listasIniciado(pj).length - Object.entries(SU().ranuras).filter(([k, x]) => k !== s && p[k] && x.dote === 'iniciado-en-la-magia').length;
   const ops = CR.dotes.filter(d => filtro(d) && (d.repetible || (!tomadas.has(d.id) && !otras.includes(d.id))) && (d.id !== 'iniciado-en-la-magia' || listasLibres > 0));
@@ -3242,8 +3348,68 @@ function opcionesPericia(pj, p) {
   const ya = new Set((pj.hoja.pericia || []).map(norm));
   return (pj.hoja.habilidades || []).filter(h => !ya.has(norm(h)) && (p.c.id !== 'mago' || ACADEMICO.some(a => norm(a) === norm(h)))).sort((a, b) => a.localeCompare(b, 'es'));
 }
+// ---- Cambios opcionales al subir de nivel (SRD 5.2.1) ----
+// Lo que puede quitar en esta subida; por cada cosa que quite, elige una más en su sección
+const suQ = () => (SU().quitar ||= { trucos: [], conj: [], invoc: [], arcanum: [], meta: [], maestria: [], estilo: [] });
+const nomInv = i => (CR.invocaciones.find(x => x.id === i) || {}).nombre || i;
+const nomMeta = i => ((CR.metamagia || []).find(x => x.id === i) || {}).nombre || i;
+function suCambios(pj) {
+  const p = planSubida(pj), c = p.c, h = pj.hoja, out = [], cn = c.nombre.toLowerCase();
+  // Conjuros que no vienen de su clase (especie, dotes, subclase, arcanum, grimorio…) no se cambian aquí
+  const protegidos = new Set([...(h.conjEspecie || []), ...(h.conjSiempre || []), ...conjSiempre(c.id, p.n, { ...h, terreno: h.terreno || SU().terreno }).map(x => x.id), ...(h.arcanum || []), ...(h.grimorio || []), ...((h.conj || {}).grimT || []), ...((h.conj || {}).grimR || []),
+    ...(h.magia || []).flatMap(m => [...(m.trucos || []), ...(m.conjuros || [])]), ...(h.maestriaConj || []), ...(h.caracteristicos || [])]);
+  const propios = f => (pj.conjuros || []).filter(i => !protegidos.has(i)).map(i => CONJ.get(i)).filter(x => x && f(x)).sort(ordenConj).map(x => ({ v: x.id, txt: x.nombre + (x.nivel ? ` (nv. ${x.nivel})` : '') }));
+  if (tipoLanzador(c.nombre)) {
+    const alt = { paladin: 'clerigo', explorador: 'druida' }[c.id], lt = alt || c.id;
+    // Solo se ofrece si quedan otros por los que cambiar (además de los nuevos que ya elige en este nivel)
+    const libres = f => CONJS.filter(x => f(x) && !(pj.conjuros || []).includes(x.id)).length;
+    const t = propios(x => x.nivel === 0 && enListaDe(x, lt));
+    if (t.length && libres(x => x.nivel === 0 && enListaDe(x, lt)) > (alt ? 0 : p.trucos)) out.push({ k: 'trucos', donde: 'Conjuros', titulo: 'Cambiar un truco', max: 1, items: t,
+      regla: c.id === 'mago' ? 'Tras un descanso largo puede sustituir un truco por otro truco de mago.' : alt ? `Al subir de nivel puede sustituir uno de los trucos de su estilo de combate por otro truco de ${alt === 'clerigo' ? 'clérigo' : 'druida'}.` : `Al subir de nivel puede sustituir un truco por otro de la lista de ${cn}.` });
+    if (c.id !== 'mago') {
+      const listas = c.id === 'bardo' && p.n >= 10 ? ['bardo', 'clerigo', 'druida', 'mago'] : [c.id], todos = c.id === 'clerigo' || c.id === 'druida';
+      const l = propios(x => x.nivel >= 1 && listas.some(k => enListaDe(x, k)));
+      if (l.length && libres(x => x.nivel >= 1 && x.nivel <= p.nivelConj && listas.some(k => enListaDe(x, k))) > p.conjuros) out.push({ k: 'conj', donde: 'Conjuros', titulo: todos ? 'Cambiar conjuros preparados' : 'Cambiar un conjuro', max: todos ? l.length : 1, items: l,
+        regla: todos ? `Tras un descanso largo puede cambiar los conjuros preparados que quiera por otros de ${cn} para los que tenga espacios.`
+          : ['paladin', 'explorador'].includes(c.id) ? `Tras un descanso largo puede sustituir un conjuro por otro de ${cn} para el que tenga espacios.` : `Al subir de nivel puede sustituir un conjuro por otro de ${cn} para el que tenga espacios.` });
+    }
+  }
+  if (c.id === 'brujo' && (h.invocaciones || []).length) out.push({ k: 'invoc', donde: 'Invocaciones sobrenaturales', titulo: 'Cambiar una invocación', max: 1,
+    regla: 'Al subir de nivel puede sustituir una invocación por otra para la que cumpla los requisitos. No puede quitar una que sea requisito de otra que tenga.',
+    items: [...new Set(h.invocaciones)].map(i => { const dep = h.invocaciones.map(x => CR.invocaciones.find(y => y.id === x)).find(y => y && y.requiereInvocacion === i);
+      return { v: i, txt: nomInv(i) + (i === 'pacto-del-grimorio' ? ' (pierde su Libro de las sombras)' : ''), no: dep ? 'la necesita ' + dep.nombre : '' }; }) });
+  if (c.id === 'brujo' && (h.arcanum || []).length) out.push({ k: 'arcanum', donde: 'Conjuros', titulo: 'Cambiar un conjuro de Arcanum místico', max: 1, regla: 'Al subir de nivel puede sustituir un conjuro de arcanum por otro de brujo del mismo nivel.',
+    items: h.arcanum.map(i => ({ v: i, txt: `${(CONJ.get(i) || {}).nombre || i} (nv. ${(CONJ.get(i) || {}).nivel})` })) });
+  if (c.id === 'hechicero' && (h.metamagia || []).length) out.push({ k: 'meta', donde: 'Metamagia', titulo: 'Cambiar una opción de metamagia', max: 1, regla: 'Al subir de nivel puede sustituir una opción de metamagia por otra que no conozca.', items: h.metamagia.map(i => ({ v: i, txt: nomMeta(i) })) });
+  if ((h.maestria || []).length && nMaestria(c.id, p.n)) { const una = c.id === 'barbaro' || c.id === 'guerrero';
+    out.push({ k: 'maestria', donde: 'Maestría con armas', titulo: una ? 'Cambiar un arma de maestría' : 'Cambiar armas de maestría', max: una ? 1 : h.maestria.length,
+      regla: una ? 'Tras un descanso largo puede cambiar una de sus armas de maestría.' : 'Tras un descanso largo puede cambiar los tipos de armas elegidos.', items: h.maestria.map(x => ({ v: x, txt: x })) }); }
+  if (c.id === 'guerrero') { const est = (h.dotes || []).filter(d => (CR.dotes.find(x => x.id === d.id) || {}).categoria === 'estilo-de-combate');
+    if (est.length) out.push({ k: 'estilo', titulo: 'Cambiar una dote de estilo de combate', max: 1, regla: 'Al subir de nivel de guerrero puede sustituir su dote de estilo de combate por otra.', items: est.map(d => ({ v: d.id, txt: d.nombre })) }); }
+  return out;
+}
+// Cuántas invocaciones, maestrías y opciones de metamagia elige en total (las nuevas + las que sustituye)
+function suTot(p) { const q = suQ(); return { invoc: p.invoc + q.invoc.length, maestria: p.maestria + q.maestria.length, meta: p.metamagia + q.meta.length }; }
+// Dotes elegidas en las ranuras de esta subida (Mejora de característica, Don épico, Estilo de combate)
+const suDotesRanuras = p => Object.entries(SU().ranuras).filter(([k, r]) => p[k] && r.tipo === 'dote' && r.dote).map(([, r]) => r.dote);
+// Dotes que tendrá al confirmar (para calcular la CA con Defensa)
+function suDotesFinales(pj, p) {
+  const s = SU(), q = suQ(), ids = (pj.hoja.dotes || []).map(d => d.id);
+  if (q.estilo.length) { const i = ids.indexOf(q.estilo[0]); if (i >= 0) ids.splice(i, 1); if ((s.nEstilo || [])[0]) ids.push(s.nEstilo[0]); }
+  ['mejora', 'don', 'estilo'].forEach(k => { const r = s.ranuras[k]; if (p[k] && r.dote && r.tipo === 'dote') ids.push(r.dote); });
+  return ids;
+}
+A.suQuitar = el => {
+  const s = SU(), q = suQ(), k = el.dataset.k, v = el.dataset.v, max = +el.dataset.max, l = q[k], i = l.indexOf(v);
+  if (i >= 0) l.splice(i, 1);
+  else if (l.length >= max) { toast(max === 1 ? 'Solo puede cambiar uno: desmarca el otro primero.' : `Como mucho ${max}.`); return; }
+  else l.push(v);
+  if (k === 'arcanum') s.cArc = [];
+  if (k === 'estilo') s.nEstilo = [];
+  guardar(); render();
+};
 function suFalta(pj) {
-  const s = SU(), p = planSubida(pj), pg = suPG(pj);
+  const s = SU(), p = planSubida(pj), pg = suPG(pj), q = suQ(), tot = suTot(p);
   if (!pg.valida) return `Escribe lo que ha sacado en el d${pg.dado} (de 1 a ${pg.dado})`;
   const dote = (r, nombre) => {
     if (!r.dote) return `${nombre}: elige una dote`;
@@ -3260,16 +3426,28 @@ function suFalta(pj) {
   if (p.habExtra && (s.nHab || []).length !== p.habExtra) return `Competencias adicionales: elige ${p.habExtra} habilidades`;
   if (p.idiomas && s.idiomas.length !== p.idiomas) return `Elige ${p.idiomas} idiomas`;
   if (p.terreno && !s.terreno) return 'Círculo de la tierra: elige un tipo de terreno';
-  if (p.metamagia && (s.nMeta || []).length !== p.metamagia) return `Metamagia: elige ${p.metamagia} opciones`;
-  if (p.maestria && (s.nMaestria || []).length !== p.maestria) return `Maestría con armas: elige ${p.maestria}`;
-  if (p.invoc && (s.nInvoc || []).length !== p.invoc) return `Invocaciones: elige ${p.invoc}`;
-  for (const g of suGrupos(pj)) if (g.elegidos.length !== g.nEf) return `${g.titulo}: elige ${g.nEf} (llevas ${g.elegidos.length})`;
+  if (q.estilo.length && (s.nEstilo || []).length !== 1) return 'Elige la nueva dote de estilo de combate';
+  if (q.estilo.length && suDotesRanuras(p).includes(s.nEstilo[0])) return 'Esa dote de estilo de combate ya la elige en otro apartado de esta subida: elige otra';
+  if (tot.meta && (s.nMeta || []).length !== tot.meta) return `Metamagia: elige ${tot.meta} (llevas ${(s.nMeta || []).length})`;
+  if (tot.maestria && (s.nMaestria || []).length !== tot.maestria) return `Maestría con armas: elige ${tot.maestria} (llevas ${(s.nMaestria || []).length})`;
+  if (tot.invoc && (s.nInvoc || []).length !== tot.invoc) return `Invocaciones: elige ${tot.invoc} (llevas ${(s.nInvoc || []).length})`;
+  const grupos = suGrupos(pj);
+  for (const g of grupos) if (g.elegidos.length !== g.nEf) return `${g.titulo}: elige ${g.nEf} (llevas ${g.elegidos.length})`;
+  // Al quitar una invocación o un truco, las invocaciones que le queden deben seguir cumpliendo sus requisitos
+  if (pj.hoja.clase === 'brujo') {
+    const inv = [...(pj.hoja.invocaciones || []).filter(i => !q.invoc.includes(i)), ...(s.nInvoc || [])];
+    const nuevosT = grupos.filter(g => /^nTrucos/.test(g.k)).flatMap(g => g.elegidos);
+    const h = pj.hoja, libro = q.invoc.includes('pacto-del-grimorio') ? [...(h.grimorio || []), ...((h.conj || {}).grimT || []), ...((h.conj || {}).grimR || [])] : [];
+    const trucos = [...(pj.conjuros || []).filter(i => !q.trucos.includes(i) && !libro.includes(i)), ...nuevosT];
+    for (const id of new Set(inv)) { const x = CR.invocaciones.find(y => y.id === id); const no = x && invocacionValida(x, p.n, inv.filter(y => y !== id), trucos); if (no) return `${x.nombre}: ${no}. Cambia lo que quitas o elige otra cosa`; }
+  }
   return '';
 }
 VISTAS.subir = id => {
   const pj = pjPorId(id), c = pj && clasePJ(pj);
   if (!c || !SU() || SU().pjId !== id || SU().nivel !== (pj.nivel || 1) + 1) return { titulo: 'Subir de nivel', atras: pj ? '#/hoja/' + id : '#/personajes', html: `<p class="vacio">No hay ninguna subida de nivel en marcha.</p>` };
-  const s = SU(), p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj);
+  equipoPJ(pj);
+  const s = SU(), p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj), q = suQ(), tot = suTot(p);
   const sec = (t, h) => `<section class="bloque"><h2 style="font-size:1.02rem;margin:0 0 6px">${t}</h2>${h}</section>`;
   let html = `<p class="wz-paso">${esc(pj.nombre)} · ${esc(c.nombre)} de nivel ${p.n - 1} → ${p.n}</p>`;
   // 1. Puntos de golpe
@@ -3282,8 +3460,8 @@ VISTAS.subir = id => {
     + (p.rasgos.length ? p.rasgos.map((r, i) => `<details class="regla"><summary>${esc(r.nombre)}${r.de === 'subclase' ? ` <small class="nv">${esc(c.subclase.nombre)}</small>` : ''}</summary><div class="cuerpo">${r.html}</div></details>`).join('') : '<p class="nota">En este nivel no gana rasgos nuevos.</p>')
     + `<p class="nota">Bonificador por competencia: ${signo(bcDeNivel(p.n))}${bcDeNivel(p.n) > bcDeNivel(p.n - 1) ? ' (¡sube!)' : ''}.</p>`
     + (p.capstone ? `<p class="nota"><b>${p.capstone.map(k => CAR_NOMBRE[k]).join(' y ')} +4</b> (hasta 25): se suma sola al confirmar (${p.capstone.map(k => `${CAR_ABR[k]} ${pj[k] ?? 10} → ${cars[k]}`).join(', ')}).</p>` : '')
-    + (() => { const d = caCalculada(pj.hoja, c.id, cars, p.n) - caCalculada(pj.hoja, c.id, Object.fromEntries(CARS_PJ.map(([k]) => [k, pj[k] ?? 10])), p.n - 1);
-      return d ? `<p class="nota">Clase de armadura: <b>${pj.ca} → ${pj.ca + d}</b> (${c.id === 'hechicero' && p.n === 3 ? 'Resistencia dracónica: sin armadura, 10 + Des + Car' : 'cambia el modificador que suma a la CA'}${ARMADURAS_INICIALES.some(a => a.re.test(norm((pj.hoja.equipo || [])[0] || ''))) ? '; calculado con su armadura inicial: si lleva otra, ajústala luego en Editar' : ''}).</p>` : ''; })());
+    + (() => { const antes = caPJ(pj).total, nueva = caPJ(pj, { cars, n: p.n, dotes: suDotesFinales(pj, p) });
+      return nueva.total !== antes ? `<p class="nota">Clase de armadura: <b>${antes} → ${nueva.total}</b> (${nueva.partes.map(esc).join(' + ')}). Se calcula con lo que lleva puesto según su hoja.</p>` : ''; })());
   // 3. Mejora de característica
   if (p.mejora) {
     const r = s.ranuras.mejora;
@@ -3302,10 +3480,7 @@ VISTAS.subir = id => {
     const altLista = c.id === 'paladin' ? 'clerigo' : 'druida', altNom = c.id === 'paladin' ? 'Guerrero bendito (2 trucos de clérigo)' : 'Guerrero druídico (2 trucos de druida)';
     let h = alt ? `<div class="seg">${suOpc('estilo', 'tipo', 'dote', r.tipo === 'dote', 'Dote de estilo de combate')}${suOpc('estilo', 'tipo', 'trucos', r.tipo === 'trucos', esc(altNom))}</div>` : '';
     if (r.tipo === 'trucos' && alt) h += `<p class="nota">Aprende 2 trucos <span class="cuenta">${r.T.length}/2</span>. Usa Carisma (paladín) o Sabiduría (explorador) para lanzarlos.</p>${suListaConj('estilo', 'T', altLista, 0, r.T, 2, new Set(pj.conjuros || []))}`;
-    else {
-      h += htmlElegirDote(pj, 'estilo', r, d => d.categoria === 'estilo-de-combate', cars);
-      if (r.dote === 'defensa') h += `<label class="check"><input type="checkbox" data-ch="suDefensa" ${s.defensaCA ? 'checked' : ''}><span>Lleva armadura: sumar +1 a su CA ahora (${pj.ca} → ${pj.ca + 1})</span></label>`;
-    }
+    else h += htmlElegirDote(pj, 'estilo', r, d => d.categoria === 'estilo-de-combate' && !(q.estilo.length && (s.nEstilo || []).includes(d.id)), cars);
     html += sec(esc(p.estilo.nombre), h);
   }
   if (p.pericia) {
@@ -3324,24 +3499,38 @@ VISTAS.subir = id => {
       <div class="seg">${Object.entries(TERRENOS_DRUIDA).map(([k, x]) => suOpc('', 'terreno', k, s.terreno === k, x.nombre)).join('')}</div>
       ${t ? `<p class="nota">${Object.entries(t.conj).map(([nv, l]) => `<b>Nivel ${nv}:</b> ${l.map(esc).join(', ')}`).join(' · ')}</p>` : ''}`);
   }
-  if (p.metamagia) {
+  // ¿Quiere cambiar algo? (opcional): lo que marque se quita y se elige otro en su sección
+  const cambios = suCambios(pj);
+  if (cambios.length) {
+    const est = q.estilo.length ? (() => { const ya = (pj.hoja.dotes || []).map(d => d.id), sel = CR.dotes.find(d => d.id === (s.nEstilo || [])[0]);
+      const ops = CR.dotes.filter(d => d.categoria === 'estilo-de-combate' && !ya.includes(d.id) && (!suDotesRanuras(p).includes(d.id) || (s.nEstilo || []).includes(d.id)));
+      return `<p class="wz-grupo-herr">Nueva dote de estilo de combate</p>${ops.length ? `<div class="chips">${ops.map(d => suChip('', 'nEstilo', d.id, (s.nEstilo || []).includes(d.id), d.nombre, 1)).join('')}</div>` : '<p class="nota">No le queda ninguna otra dote de estilo de combate: desmarca el cambio.</p>'}${sel ? `<div class="wz-det">${sel.html}</div>` : ''}`; })() : '';
+    html += sec('¿Quiere cambiar algo?', `<p class="nota" style="margin-top:0">Es opcional. Marca lo que quiera quitar y, más abajo, elegirá otro en su lugar: se le pedirá uno más por cada uno que quite. Si no quiere cambiar nada, déjalo como está.</p>`
+      + cambios.map(cb => { const sel = q[cb.k];
+        return `<details class="regla" ${sel.length ? 'open' : ''}><summary>${esc(cb.titulo)}${sel.length ? ` <span class="cuenta">${sel.length}</span>` : ''}</summary><div class="cuerpo">
+          <p class="nota" style="margin-top:0">${esc(cb.regla)}${cb.max > 1 ? '' : ' Toca el que quiera quitar.'}</p>
+          <div class="chips">${cb.items.map(it => { const on = sel.includes(it.v), des = !on && !!it.no;
+            return `<button class="chip${on ? ' on quitar' : ''}" data-a="suQuitar" data-k="${cb.k}" data-v="${esc(it.v)}" data-max="${cb.max}" aria-pressed="${on}" ${des ? 'disabled' : ''}>${on ? '✕ ' : ''}${esc(it.txt)}${it.no ? ` (${esc(it.no)})` : ''}</button>`; }).join('')}</div>
+          ${sel.length && cb.donde ? `<p class="nota">Elige ${sel.length === 1 ? 'el nuevo' : 'los nuevos'} en «${cb.donde}», más abajo.</p>` : ''}${cb.k === 'estilo' ? est : ''}</div></details>`; }).join(''));
+  }
+  if (tot.meta) {
     const ya = pj.hoja.metamagia || []; s.nMeta ||= [];
-    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${p.metamagia} opciones de metamagia <span class="cuenta">${s.nMeta.length}/${p.metamagia}</span>. Cada una cuesta puntos de hechicería. Toca una para leerla.</p>
+    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${tot.meta === 1 ? '1 opción' : tot.meta + ' opciones'} de metamagia${q.meta.length ? ` (${q.meta.length === tot.meta ? 'por la que quita' : 'incluye 1 por la que quita'})` : ''} <span class="cuenta">${s.nMeta.length}/${tot.meta}</span>. Cada una cuesta puntos de hechicería. Toca una para leerla.</p>
       <div class="wz-ops">${(CR.metamagia || []).map(m => { const on = s.nMeta.includes(m.id), des = !on && ya.includes(m.id);
-        return `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${p.metamagia}" ${des ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}</small>${on ? `<div class="wz-op-det">${m.html}</div>` : ''}</button>`; }).join('')}</div>`);
+        return `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${tot.meta}" ${des ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}</small>${on ? `<div class="wz-op-det">${m.html}</div>` : ''}</button>`; }).join('')}</div>`);
   }
   if (p.idiomas) {
     const sabe = new Set((pj.hoja.idiomas || []).map(norm));
     html += sec('Idiomas (Explorador hábil)', `<p class="nota" style="margin-top:0">Aprende 2 idiomas de su elección.</p><div class="chips">${[...CR.idiomas.estandar, ...CR.idiomas.inusuales].map(i => suChip('', 'idiomas', i, s.idiomas.includes(i), i, 2, sabe.has(norm(i)))).join('')}</div>`);
   }
   ['nTrucos', 'nConj', 'nInvoc', 'nMaestria', 'grimT', 'grimR'].forEach(k => s[k] ||= []);
-  if (p.maestria) html += sec('Maestría con armas', `<p class="nota" style="margin-top:0">Puede usar la maestría con ${p.maestria === 1 ? '1 tipo de arma más' : p.maestria + ' tipos de armas más'} <span class="cuenta">${s.nMaestria.length}/${p.maestria}</span>. Ya tiene: ${esc((pj.hoja.maestria || []).join(', ') || 'ninguna anotada')}.</p>`
-    + htmlMaestria(c.id, s.nMaestria, pj.hoja.maestria || [], (v, on, txt, des) => suChip('', 'nMaestria', v, on, txt, p.maestria, des)));
-  const conocidos = new Set(pj.conjuros || []);
-  if (p.invoc) {
-    const trucos = [...(pj.conjuros || []), ...s.nTrucos];
-    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${p.invoc === 1 ? '1 invocación nueva' : p.invoc + ' invocaciones nuevas'} <span class="cuenta">${s.nInvoc.length}/${p.invoc}</span>. Ya conoce: ${esc((pj.hoja.invocaciones || []).map(i => (CR.invocaciones.find(x => x.id === i) || {}).nombre || i).join(', ') || 'ninguna anotada')}. Toca una para leerla.</p>`
-      + htmlInvocaciones(p.n, pj.hoja.invocaciones || [], s.nInvoc, trucos, (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${p.invoc}" ${des ? 'disabled' : ''}>${inner}</button>`));
+  const quedan = (l, k) => (l || []).filter(x => !q[k].includes(x));
+  if (tot.maestria) html += sec('Maestría con armas', `<p class="nota" style="margin-top:0">Elige ${tot.maestria === 1 ? '1 tipo de arma' : tot.maestria + ' tipos de armas'}${q.maestria.length ? ` (${q.maestria.length === tot.maestria ? 'por las que quita' : 'incluye las que quita'})` : ' más'} <span class="cuenta">${s.nMaestria.length}/${tot.maestria}</span>. Sigue teniendo: ${esc(quedan(pj.hoja.maestria, 'maestria').join(', ') || 'ninguna')}.</p>`
+    + htmlMaestria(c.id, s.nMaestria, pj.hoja.maestria || [], (v, on, txt, des) => suChip('', 'nMaestria', v, on, txt, tot.maestria, des)));
+  if (tot.invoc) {
+    const trucos = [...quedan(pj.conjuros, 'trucos'), ...s.nTrucos];
+    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Toca una para leerla.</p>`
+      + htmlInvocaciones(p.n, quedan(pj.hoja.invocaciones, 'invoc'), s.nInvoc, trucos, (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${tot.invoc}" ${des ? 'disabled' : ''}>${inner}</button>`));
   }
   const tipo = tipoLanzador(c.nombre);
   if (tipo) {
@@ -3391,9 +3580,9 @@ A.suHerrPropia = el => {
 A.suConfirmar = () => {
   const s = SU(), pj = pjPorId(s.pjId); if (!pj) return;
   const falta = suFalta(pj); if (falta) { toast(falta); return; }
-  const p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj), h = pj.hoja, resumen = [], grupos = suGrupos(pj);
-  const antes = Object.fromEntries(CARS_PJ.map(([k]) => [k, pj[k] ?? 10]));
-  const dCA = caCalculada(h, p.c.id, cars, p.n) - caCalculada(h, p.c.id, antes, p.n - 1);
+  equipoPJ(pj);
+  const p = planSubida(pj), pg = suPG(pj), cars = suCaracteristicas(pj), h = pj.hoja, resumen = [], grupos = suGrupos(pj), q = suQ(), tot = suTot(p);
+  const antes = Object.fromEntries(CARS_PJ.map(([k]) => [k, pj[k] ?? 10])), caAntes = pj.ca;
   Object.assign(pj, cars);
   pj.nivel = p.n; pj.pgMax = (pj.pgMax || 0) + pg.total;
   resumen.push(`+${pg.total} PG (${s.pgModo === 'tirada' ? 'tirada ' + pg.base : 'valor fijo'})`);
@@ -3412,33 +3601,53 @@ A.suConfirmar = () => {
   if (p.estilo) {
     const r = s.ranuras.estilo;
     if (r.tipo === 'trucos') { pj.conjuros.push(...r.T); resumen.push('2 trucos (' + r.T.map(i => CONJ.get(i).nombre).join(', ') + ')'); }
-    else { ganarDote(r, `nivel ${p.n}`); if (r.dote === 'defensa' && s.defensaCA) pj.ca = (pj.ca || 10) + 1; }
+    else ganarDote(r, `nivel ${p.n}`);
   }
   if (subidas.length) resumen.push(subidas.join(', '));
   if (p.pericia) { h.pericia.push(...s.pericia); resumen.push('pericia en ' + s.pericia.join(' y ')); }
   if (p.idiomas) { h.idiomas.push(...s.idiomas); resumen.push('idiomas ' + s.idiomas.join(' y ')); }
   if (p.subclase) { h.subclase = p.c.subclase.nombre; resumen.push('subclase ' + h.subclase); }
   const nombresC = ids => ids.map(i => (CONJ.get(i) || {}).nombre || i).join(', ');
-  if (p.maestria) { h.maestria = [...(h.maestria || []), ...s.nMaestria]; resumen.push('maestría con ' + s.nMaestria.join(', ')); }
-  if (p.invoc) { h.invocaciones = [...(h.invocaciones || []), ...s.nInvoc]; resumen.push('invocaciones: ' + s.nInvoc.map(i => (CR.invocaciones.find(x => x.id === i) || {}).nombre || i).join(', ')); }
+  // Cambios opcionales: primero se quita lo marcado y luego se añade lo nuevo
+  const fuera = [...q.trucos, ...q.conj, ...q.arcanum];
+  if (fuera.length) { pj.conjuros = pj.conjuros.filter(i => !fuera.includes(i)); resumen.push('quita ' + nombresC(fuera)); }
+  if (q.arcanum.length) h.arcanum = (h.arcanum || []).filter(i => !q.arcanum.includes(i));
+  if (q.invoc.length) {
+    h.invocaciones ||= []; q.invoc.forEach(x => { const i = h.invocaciones.indexOf(x); if (i >= 0) h.invocaciones.splice(i, 1); }); // las repetibles pueden estar dos veces: se quita una
+    resumen.push('quita ' + q.invoc.map(nomInv).join(', '));
+    if (q.invoc.includes('pacto-del-grimorio')) { const libro = [...(h.grimorio || []), ...((h.conj || {}).grimT || []), ...((h.conj || {}).grimR || [])]; pj.conjuros = pj.conjuros.filter(i => !libro.includes(i)); h.grimorio = []; if (h.conj) { h.conj.grimT = []; h.conj.grimR = []; } }
+  }
+  if (q.meta.length) { h.metamagia = (h.metamagia || []).filter(i => !q.meta.includes(i)); resumen.push('quita ' + q.meta.map(nomMeta).join(', ')); }
+  if (q.maestria.length) { h.maestria = (h.maestria || []).filter(i => !q.maestria.includes(i)); resumen.push('quita maestría con ' + q.maestria.join(', ')); }
+  if (q.estilo.length) {
+    const i = h.dotes.findIndex(d => d.id === q.estilo[0]), viejo = h.dotes[i], nueva = CR.dotes.find(x => x.id === s.nEstilo[0]);
+    if (i >= 0) h.dotes.splice(i, 1, { id: nueva.id, nombre: nueva.nombre, origen: viejo.origen });
+    resumen.push(`cambia ${viejo ? viejo.nombre : 'estilo'} por ${nueva.nombre}`);
+  }
+  if (tot.maestria) { h.maestria = [...(h.maestria || []), ...s.nMaestria]; resumen.push('maestría con ' + s.nMaestria.join(', ')); }
+  if (tot.invoc) { h.invocaciones = [...(h.invocaciones || []), ...s.nInvoc]; resumen.push('invocaciones: ' + s.nInvoc.map(nomInv).join(', ')); }
   if (p.habExtra) { h.habilidades.push(...s.nHab); resumen.push('competencia en ' + s.nHab.join(', ')); }
   if (p.terreno) { h.terreno = s.terreno; resumen.push('terreno ' + TERRENOS_DRUIDA[s.terreno].nombre.toLowerCase()); }
-  if (p.metamagia) { h.metamagia = [...(h.metamagia || []), ...s.nMeta]; resumen.push('metamagia: ' + s.nMeta.map(i => (CR.metamagia.find(m => m.id === i) || {}).nombre || i).join(', ')); }
+  if (tot.meta) { h.metamagia = [...(h.metamagia || []), ...s.nMeta]; resumen.push('metamagia: ' + s.nMeta.map(i => (CR.metamagia.find(m => m.id === i) || {}).nombre || i).join(', ')); }
   const nuevosConj = grupos.filter(g => !g.libro).flatMap(g => g.elegidos);
   if (nuevosConj.length) { pj.conjuros.push(...nuevosConj); resumen.push('conjuros: ' + nombresC(nuevosConj)); }
   const de = k => (grupos.find(g => g.k === k) || {}).elegidos || [];
-  if (p.arcanum) h.arcanum = [...(h.arcanum || []), ...de('nArc')];
+  if (p.arcanum || q.arcanum.length) h.arcanum = [...(h.arcanum || []), ...de('nArc'), ...de('cArc')];
+  if (de('grimT').length || de('grimR').length) h.grimorio = [...(h.grimorio || []), ...de('grimT'), ...de('grimR')];
   if (p.descub) h.conjSiempre = [...(h.conjSiempre || []), ...de('nDesc')];
   if (de('mc1').length || de('mc2').length) { h.maestriaConj = [...de('mc1'), ...de('mc2')]; resumen.push('maestría sobre ' + nombresC(h.maestriaConj)); }
   if (de('car3').length) { h.caracteristicos = de('car3'); resumen.push('conjuros característicos: ' + nombresC(h.caracteristicos)); }
   if (p.auto.length) { const ids = p.auto.map(a => a.id); pj.conjuros.push(...ids); h.conjSiempre = [...new Set([...(h.conjSiempre || []), ...ids])]; resumen.push('siempre preparados: ' + nombresC(ids)); }
-  if (dCA) { resumen.push(`CA ${pj.ca} → ${pj.ca + dCA}`); pj.ca += dCA; }
+  // CA con lo que lleva puesto, ya con las características, el nivel y las dotes nuevas
+  pj.ca = caPJ(pj).total;
+  if (pj.ca !== caAntes) resumen.push(`CA ${caAntes} → ${pj.ca}`);
   const nuevos = p.rasgos.map(r => r.nombre).filter(x => !/^Mejora de característica$|^Don épico$/.test(x));
   if (nuevos.length) resumen.push('rasgos: ' + nuevos.join(', '));
   h.niveles ||= []; h.niveles.push({ nivel: p.n, resumen: resumen.join(' · '), fecha: Date.now() });
   pj.conjuros = [...new Set(pj.conjuros)];
   pj.pasiva = pasivaPJ(pj);
   E.subidaPJ = null;
+  ['ca', 'nivel', 'pgMax'].forEach(k => sincronizarPJ(pj, k));
   A.rellenarEspacios({ dataset: { pj: pj.id } });
   navegar('#/hoja/' + pj.id);
   setTimeout(() => toast(`${pj.nombre} sube a nivel ${p.n}`), 60);
@@ -3519,7 +3728,19 @@ function actualizarResultados(clave) {
   else { const h = hojaActual(); const r = h && $('#res-fa', h.el); if (r) r.innerHTML = htmlResultadosAnadir(); }
 }
 const C = {};
-C.suDefensa = el => { if (E.subidaPJ) { E.subidaPJ.defensaCA = el.checked; guardar(); } };
+// Hoja: armadura, escudo y bonos a la CA. La CA se recalcula y pasa a los encuentros.
+function cambiarEquipo(el, fn) {
+  const pj = pjPorId(el.dataset.id); if (!pj || !pj.hoja) return;
+  equipoPJ(pj); const antes = pj.ca;
+  fn(pj.hoja, el);
+  pj.ca = caPJ(pj).total; sincronizarPJ(pj, 'ca'); guardar(); render();
+  if (pj.ca !== antes) toast(`CA ${antes} → ${pj.ca}`);
+}
+C.hojaArmadura = el => cambiarEquipo(el, (h, x) => { h.armadura = x.value || null; if (h.armadura) h.armaduraMago = false; });
+C.hojaEscudo = el => cambiarEquipo(el, (h, x) => { h.escudo = x.checked; });
+C.hojaMago = el => cambiarEquipo(el, (h, x) => { h.armaduraMago = x.checked; });
+C.hojaCAExtra = el => cambiarEquipo(el, (h, x) => { h.caExtra = Math.max(-10, Math.min(10, parseInt(x.value, 10) || 0)); });
+I.hojaEquipo = el => { const pj = pjPorId(el.dataset.id); if (pj && pj.hoja) { pj.hoja.equipoActual = el.value; guardar(); } };
 C.feOrigen = () => { const h = hojaActual(); if (h) proponerVinculo(h); };
 C.feVinc = () => { const h = hojaActual(); if (h) h.vincManual = true; };
 C.pjchk = el => {
@@ -3548,6 +3769,16 @@ C.pjSync = el => {
   if (CARS_PJ.some(([c]) => c === k) && pj[k] != null) {
     pj[k] = Math.max(1, Math.min(30, pj[k])); el.value = pj[k]; guardar();
     const md = $(`[data-mod="${k}"]`); if (md) md.textContent = signo(modDe(pj[k]));
+  }
+  // Personajes con hoja completa: la CA sale de su armadura. Si cambia una característica, se recalcula;
+  // si se escribe la CA a mano, la diferencia se guarda como «otros bonos a la CA».
+  if (pj.hoja && clasePJ(pj)) {
+    equipoPJ(pj);
+    if (k === 'ca' && pj.ca != null) { pj.hoja.caExtra = (pj.hoja.caExtra || 0) + pj.ca - caPJ(pj).total; guardar(); }
+    else if (CARS_PJ.some(([c]) => c === k)) {
+      const nueva = caPJ(pj).total;
+      if (nueva !== pj.ca) { const antes = pj.ca; pj.ca = nueva; guardar(); const f = $('[data-k="ca"]'); if (f) f.value = nueva; sincronizarPJ(pj, 'ca'); toast(`CA ${antes} → ${nueva}`); }
+    }
   }
   // La Inspiración bárdica cambia sola con el Carisma
   if (k === 'car') {
