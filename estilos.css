@@ -425,6 +425,10 @@ details.accion > summary { padding: 8px 10px; cursor: pointer; list-style: none;
 .bolas { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .bola { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--pj); background: transparent; cursor: pointer; padding: 0; }
 .bola.on { background: var(--pj); }
+.reserva-ctrl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reserva-n { font-size: 1.15rem; min-width: 64px; }
+.reserva-n small { font-size: .8rem; color: var(--suave); font-weight: 600; }
+.reserva-in { width: 64px; min-height: 34px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--borde); background: var(--superficie); text-align: center; }
 .fila-anadir { display: flex; gap: 8px; margin: 10px 0; }
 .fila-anadir input { flex: 1; min-height: 40px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie); }
 .lanzar { margin: 6px 0 12px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--pj) 12%, var(--superficie)); border: 1px solid color-mix(in srgb, var(--pj) 40%, transparent); }

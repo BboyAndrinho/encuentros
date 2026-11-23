@@ -95,6 +95,48 @@ function tipoLanzador(clase) {
   if (es('bruj')) return 'pacto';
   return null;
 }
+// ---- Recursos de clase (SRD 5.2.1, capítulo «Clases») y cómo se recuperan ----
+// descanso: 'uno'   → con descanso corto recupera UN uso; con descanso largo, todos
+//           'corto' → con descanso corto o largo recupera todos
+//           'largo' → solo con descanso largo
+const FURIAS = [0, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6];
+const ENEMIGO_PREDILECTO = [0, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6];
+const RECURSOS_CLASE = {
+  barbaro: [{ clave: 'furia', nombre: 'Furia', desde: 1, max: n => FURIAS[n], descanso: 'uno' }],
+  bardo: [{ clave: 'inspiracion-bardica', nombre: 'Inspiración bárdica', desde: 1, max: () => 1, descanso: n => n >= 5 ? 'corto' : 'largo', nota: 'Usos = su modificador por Carisma (mínimo 1): ajústalo con + y −' }],
+  clerigo: [{ clave: 'canalizar-divinidad', nombre: 'Canalizar divinidad', desde: 2, max: n => n >= 18 ? 4 : n >= 6 ? 3 : 2, descanso: 'uno' }],
+  druida: [{ clave: 'forma-salvaje', nombre: 'Forma salvaje', desde: 2, max: n => n >= 17 ? 4 : n >= 6 ? 3 : 2, descanso: 'uno' }],
+  explorador: [{ clave: 'enemigo-predilecto', nombre: 'Enemigo predilecto (marca del cazador sin espacio)', desde: 1, max: n => ENEMIGO_PREDILECTO[n], descanso: 'largo' }],
+  guerrero: [
+    { clave: 'tomar-aliento', nombre: 'Tomar aliento', desde: 1, max: n => n >= 10 ? 4 : n >= 4 ? 3 : 2, descanso: 'uno' },
+    { clave: 'accion-subita', nombre: 'Acción súbita', desde: 2, max: n => n >= 17 ? 2 : 1, descanso: 'corto' },
+    { clave: 'indomito', nombre: 'Indómito', desde: 9, max: n => n >= 17 ? 3 : n >= 13 ? 2 : 1, descanso: 'largo' }
+  ],
+  hechicero: [
+    { clave: 'hechiceria-innata', nombre: 'Hechicería innata', desde: 1, max: () => 2, descanso: 'largo' },
+    { clave: 'puntos-hechiceria', nombre: 'Puntos de hechicería', desde: 2, max: n => n, descanso: 'largo' }
+  ],
+  mago: [{ clave: 'recuperacion-arcana', nombre: 'Recuperación arcana (tras un descanso corto)', desde: 1, max: () => 1, descanso: 'largo' }],
+  monje: [{ clave: 'puntos-concentracion', nombre: 'Puntos de concentración', desde: 2, max: n => n, descanso: 'corto' }],
+  paladin: [
+    { clave: 'imponer-manos', nombre: 'Imponer las manos', desde: 1, max: n => 5 * n, descanso: 'largo', reserva: true },
+    { clave: 'canalizar-divinidad', nombre: 'Canalizar divinidad', desde: 3, max: n => n >= 11 ? 3 : 2, descanso: 'uno' }
+  ]
+};
+const RAICES_CLASE = { barbar: 'barbaro', bard: 'bardo', cleri: 'clerigo', druid: 'druida', explorador: 'explorador', guerrer: 'guerrero', hechicer: 'hechicero', mag: 'mago', monj: 'monje', paladin: 'paladin' };
+function claseDe(clase) {
+  const w = norm(clase).split(/[\s,/]+/);
+  for (const [raiz, k] of Object.entries(RAICES_CLASE)) if (w.some(x => x.startsWith(raiz))) return k;
+  return null;
+}
+const defRecurso = r => r.clave && Object.values(RECURSOS_CLASE).flat().find(d => d.clave === r.clave);
+// Cómo se recupera un recurso: los de clase según el SRD; los personalizados, como diga el máster
+function reglaRecurso(r, pj) {
+  const d = defRecurso(r);
+  if (!d) return r.descanso === 'corto' ? 'corto' : 'largo';
+  return typeof d.descanso === 'function' ? d.descanso(pj.nivel || 1) : d.descanso;
+}
+const TEXTO_REGLA = { uno: 'descanso corto: recupera 1 · largo: todos', corto: 'descanso corto o largo: todos', largo: 'solo descanso largo' };
 // Los espacios y recursos se guardan en el PERFIL: cualquier encuentro lee siempre lo mismo
 function espaciosPJ(pj) { pj.espacios ||= { max: Array(9).fill(0), usados: Array(9).fill(0) }; return pj.espacios; }
 
@@ -1172,24 +1214,40 @@ function htmlRecursosPJ(pj, modo) {
   const visibles = niveles.filter(x => editar ? x.n <= Math.min(9, Math.max(ultimo + 1, 1)) : x.mx > 0);
   const filasEsp = visibles.map(x => fila(`Nivel ${x.n}`, '', x.mx, x.us, `esp:${x.n}`)).join('');
   const filaPacto = pacto ? fila('Magia del pacto', `espacios de nivel ${pacto.nivel} · descanso corto`, pacto.max, pacto.usados, 'pacto') : '';
-  const filasRec = rec.map(r => `<div class="rec-fila"><span class="rec-nom">${esc(r.nombre)}<small>${r.descanso === 'corto' ? 'descanso corto o largo' : 'descanso largo'}</small></span>
-    ${editar ? `<span class="rec-max"><button class="icono peq" data-a="maxPJ" data-pj="${pj.id}" data-k="rec:${r.id}" data-d="-1">−</button><b>${r.max}</b><button class="icono peq" data-a="maxPJ" data-pj="${pj.id}" data-k="rec:${r.id}" data-d="1">+</button>
-      <button class="icono peq" data-a="recDescanso" data-pj="${pj.id}" data-id="${r.id}" aria-label="Cambiar descanso" title="Cambiar descanso">⟳</button><button class="icono peq" data-a="quitarRecPJ" data-pj="${pj.id}" data-id="${r.id}" aria-label="Quitar">${ic(IC.cerrar)}</button></span>` : ''}
-    <span class="bolas">${bolas(r.max, Math.min(r.usados || 0, r.max), `data-a="usoPJ" data-pj="${pj.id}" data-k="rec:${r.id}"`, r.nombre)}</span></div>`).join('');
+  const filasRec = rec.map(r => {
+    const d = defRecurso(r);
+    const sub = TEXTO_REGLA[reglaRecurso(r, pj)] + (d && d.nota && editar ? ' · ' + d.nota : '');
+    const ctrl = editar ? `<span class="rec-max"><button class="icono peq" data-a="maxPJ" data-pj="${pj.id}" data-k="rec:${r.id}" data-d="-1" aria-label="Menos">−</button><b>${r.max}</b><button class="icono peq" data-a="maxPJ" data-pj="${pj.id}" data-k="rec:${r.id}" data-d="1" aria-label="Más">+</button>
+      ${d ? '' : `<button class="icono peq" data-a="recDescanso" data-pj="${pj.id}" data-id="${r.id}" aria-label="Cambiar descanso" title="Cambiar descanso">⟳</button>`}<button class="icono peq" data-a="quitarRecPJ" data-pj="${pj.id}" data-id="${r.id}" aria-label="Quitar">${ic(IC.cerrar)}</button></span>` : '';
+    if (r.reserva) {
+      // Reserva grande (Imponer las manos): contador con número en vez de bolitas
+      const quedan = r.max - (r.usados || 0);
+      return `<div class="rec-fila reserva"><span class="rec-nom">${esc(r.nombre)}<small>${sub}</small></span>${ctrl}
+        <span class="reserva-ctrl"><b class="reserva-n">${quedan}<small> / ${r.max}</small></b>
+          <input class="reserva-in" type="number" inputmode="numeric" min="1" placeholder="PG" aria-label="Cantidad">
+          <button class="btn mini" data-a="gastarReserva" data-pj="${pj.id}" data-id="${r.id}" data-d="1">Gastar</button>
+          <button class="btn mini" data-a="gastarReserva" data-pj="${pj.id}" data-id="${r.id}" data-d="-1">Devolver</button></span></div>`;
+    }
+    return `<div class="rec-fila"><span class="rec-nom">${esc(r.nombre)}<small>${sub}</small></span>${ctrl}
+      <span class="bolas">${bolas(r.max, Math.min(r.usados || 0, r.max), `data-a="usoPJ" data-pj="${pj.id}" data-k="rec:${r.id}"`, r.nombre)}</span></div>`;
+  }).join('');
   if (!editar) {
     if (!filasEsp && !filaPacto && !filasRec) return '';
     return `<details class="sec-mon" data-k="rec-pj" open><summary>Espacios y recursos</summary>${filaPacto}${filasEsp}${filasRec}
       <p class="nota" style="margin:4px 0 8px">Toca una bolita para gastar o recuperar. Se guarda en su perfil.</p></details>`;
   }
-  const tipo = tipoLanzador(pj.clase);
+  const tipo = tipoLanzador(pj.clase); const clase = claseDe(pj.clase);
+  const sugerencias = (RECURSOS_CLASE[clase] || []).map(d => d.nombre);
   return `<section class="bloque recursos-pj">
-    <div class="bloque-cab"><h2>Espacios de conjuro</h2>${tipo ? `<button class="btn peq" data-a="rellenarEspacios" data-pj="${pj.id}">Rellenar según clase y nivel</button>` : ''}</div>
+    ${tipo || clase ? `<button class="btn ancho" data-a="rellenarEspacios" data-pj="${pj.id}">Rellenar espacios y recursos según su clase y nivel</button>
+      <p class="nota" style="margin-top:0">Usa las tablas del SRD. Vuelve a pulsarlo cuando suba de nivel.</p>` : ''}
+    <div class="bloque-cab"><h2>Espacios de conjuro</h2></div>
     ${!tipo && !ultimo && !pacto ? '<p class="nota">Si lanza conjuros, pon cuántos espacios tiene de cada nivel con + y −.</p>' : ''}
     ${filaPacto}${filasEsp}
-    <div class="bloque-cab" style="margin-top:14px"><h2>Otros recursos</h2></div>
-    <p class="nota" style="margin-top:0">Por ejemplo: Tomar aliento, Canalizar divinidad, Inspiración bárdica, Furia…</p>
+    <div class="bloque-cab" style="margin-top:14px"><h2>Recursos de clase</h2></div>
+    <p class="nota" style="margin-top:0">Tomar aliento, Furia, Canalizar divinidad… Cada uno se recupera con el descanso que indica el SRD.</p>
     ${filasRec}
-    <div class="fila-anadir"><input id="rec-nombre" placeholder="Nombre del recurso"><button class="btn peq" data-a="nuevoRecPJ" data-pj="${pj.id}">${ic(IC.mas)} Añadir</button></div>
+    <div class="fila-anadir"><input id="rec-nombre" list="rec-sug" placeholder="Añadir otro recurso"><datalist id="rec-sug">${sugerencias.map(n => `<option value="${esc(n)}">`).join('')}</datalist><button class="btn peq" data-a="nuevoRecPJ" data-pj="${pj.id}">${ic(IC.mas)} Añadir</button></div>
     <div class="botonera"><button class="btn peq" data-a="descanso" data-tipo="corto" data-pj="${pj.id}">Descanso corto</button><button class="btn peq" data-a="descanso" data-tipo="largo" data-pj="${pj.id}">Descanso largo</button></div>
   </section>`;
 }
@@ -1197,7 +1255,11 @@ function htmlRecursosPJ(pj, modo) {
 function aplicarDescanso(pjs, tipo) {
   for (const pj of pjs) {
     if (pj.pacto) pj.pacto.usados = 0;
-    for (const r of pj.recursos || []) if (tipo === 'largo' || r.descanso === 'corto') r.usados = 0;
+    for (const r of pj.recursos || []) {
+      const regla = reglaRecurso(r, pj);
+      if (tipo === 'largo' || regla === 'corto') r.usados = 0;
+      else if (regla === 'uno') r.usados = Math.max(0, (r.usados || 0) - 1); // descanso corto: solo un uso
+    }
     if (tipo === 'largo') { const e = espaciosPJ(pj); e.usados = Array(9).fill(0); }
   }
   guardar();
@@ -1774,7 +1836,7 @@ function cambiarUsoPJ(pj, k, d, campo) {
     else pj.pacto.usados = Math.max(0, Math.min(pj.pacto.max, pj.pacto.usados + d));
   } else if (k.startsWith('rec:')) {
     const r = (pj.recursos || []).find(x => x.id === k.slice(4)); if (!r) return;
-    if (campo === 'max') { r.max = Math.max(1, Math.min(20, r.max + d)); r.usados = Math.min(r.usados || 0, r.max); }
+    if (campo === 'max') { r.max = Math.max(1, Math.min(r.reserva ? 300 : 20, r.max + d)); r.usados = Math.min(r.usados || 0, r.max); }
     else r.usados = Math.max(0, Math.min(r.max, (r.usados || 0) + d));
   }
   guardar();
@@ -1788,20 +1850,49 @@ A.rellenarEspacios = el => {
   if (tipo === 'pacto') {
     const [max, nivel] = PACTO_BRUJO[n];
     pj.pacto = { max, nivel, usados: Math.min((pj.pacto && pj.pacto.usados) || 0, max) };
-    toast(`Magia del pacto de nivel ${n}: ${max} espacios de nivel ${nivel}`);
   } else if (tipo) {
     const tabla = (tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[n];
     e.max = Array.from({ length: 9 }, (_, i) => tabla[i] || 0);
     e.usados = e.usados.map((u, i) => Math.min(u || 0, e.max[i]));
-    toast(`Espacios de nivel ${n}: ${tabla.join(' / ')}`);
   }
+  // Recursos de su clase con los usos de su nivel (el máximo de Inspiración bárdica lo pone el máster: depende del Carisma)
+  const defs = (RECURSOS_CLASE[claseDe(pj.clase)] || []).filter(d => n >= d.desde);
+  pj.recursos ||= [];
+  for (const d of defs) {
+    let r = pj.recursos.find(x => x.clave === d.clave);
+    if (!r) { r = { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n), usados: 0 }; pj.recursos.push(r); }
+    else if (d.clave !== 'inspiracion-bardica') r.max = d.max(n);
+    r.reserva = !!d.reserva; r.usados = Math.min(r.usados || 0, r.max);
+  }
+  const partes = [];
+  if (tipo === 'pacto') partes.push(`Pacto: ${pj.pacto.max} espacios de nivel ${pj.pacto.nivel}`);
+  else if (tipo) partes.push(`Espacios: ${(tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[n].join(' / ')}`);
+  if (defs.length) partes.push(defs.map(d => `${d.nombre.replace(/ \(.*\)$/, '')} ${pj.recursos.find(x => x.clave === d.clave).max}`).join(', '));
+  toast(partes.length ? `Nivel ${n}: ${partes.join(' · ')}` : 'Su clase no tiene espacios ni recursos en el SRD');
   guardar(); refrescar();
 };
 A.nuevoRecPJ = el => {
   const pj = pjPorId(el.dataset.pj); const inp = $('#rec-nombre'); const nombre = inp && inp.value.trim();
   if (!pj || !nombre) return toast('Escribe el nombre del recurso');
-  pj.recursos ||= []; pj.recursos.push({ id: uid(), nombre, max: 1, usados: 0, descanso: 'largo' });
-  guardar(); refrescar(); toast(`${nombre} añadido: ajusta los usos con + y −`);
+  pj.recursos ||= [];
+  // Si es un recurso de clase conocido, la app sabe sus usos y cómo se recupera
+  const d = Object.values(RECURSOS_CLASE).flat().find(x => norm(x.nombre) === norm(nombre) || norm(x.nombre).startsWith(norm(nombre) + ' ('));
+  if (d && pj.recursos.some(x => x.clave === d.clave)) return toast(`${d.nombre} ya está en su lista`);
+  const n = Math.max(1, Math.min(20, pj.nivel || 1));
+  pj.recursos.push(d ? { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n), usados: 0, reserva: !!d.reserva } : { id: uid(), nombre, max: 1, usados: 0, descanso: 'largo' });
+  guardar(); refrescar();
+  toast(d ? `${d.nombre}: ${TEXTO_REGLA[reglaRecurso({ clave: d.clave }, pj)]}` : `${nombre} añadido: ajusta los usos con + y − y el descanso con ⟳`);
+};
+A.gastarReserva = el => {
+  const pj = pjPorId(el.dataset.pj); const r = pj && (pj.recursos || []).find(x => x.id === el.dataset.id); if (!r) return;
+  const inp = el.closest('.rec-fila').querySelector('.reserva-in'); const n = num(inp && inp.value);
+  if (!n || n < 1) { inp && inp.focus(); return toast('Escribe cuántos puntos'); }
+  const d = +el.dataset.d; const antes = r.usados || 0;
+  r.usados = Math.max(0, Math.min(r.max, antes + d * n)); guardar();
+  const enc = encActual();
+  if (enc && enc.combate && d > 0) accionCombate(enc, () => registrar(enc, `${pj.nombre} gasta ${r.usados - antes} de ${r.nombre} (quedan ${r.max - r.usados})`));
+  else refrescar();
+  toast(`${r.nombre}: quedan ${r.max - r.usados} de ${r.max}`);
 };
 A.quitarRecPJ = async el => {
   const pj = pjPorId(el.dataset.pj); const r = pj && (pj.recursos || []).find(x => x.id === el.dataset.id); if (!r) return;
@@ -1819,7 +1910,7 @@ A.descanso = async el => {
   const pjs = todos ? E.personajes : [pjPorId(el.dataset.pj)].filter(Boolean);
   if (!pjs.length) return;
   const quien = todos ? 'todo el grupo' : pjs[0].nombre;
-  const que = tipo === 'largo' ? 'todos los espacios de conjuro y recursos' : 'la Magia del pacto y los recursos de descanso corto';
+  const que = tipo === 'largo' ? 'todos los espacios de conjuro y recursos' : 'la Magia del pacto y los recursos de descanso corto (algunos, como Tomar aliento, solo un uso)';
   const ok = await preguntar(`¿Descanso ${tipo} para ${esc(quien)}? Se recuperan ${que}.`, [{ t: `Descanso ${tipo}`, v: true, clase: 'primario' }, { t: 'Cancelar' }]);
   if (!ok) return;
   aplicarDescanso(pjs, tipo); refrescar(); toast(`Descanso ${tipo}: ${quien} recupera ${que}`);
