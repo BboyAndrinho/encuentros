@@ -21,6 +21,8 @@ const vdNum = s => { if (s === '' || s == null) return 0; s = String(s); if (s.i
 const fmt = n => (n || 0).toLocaleString('es-ES');
 const CARS = ['Fue', 'Des', 'Con', 'Int', 'Sab', 'Car'];
 const CARS_LARGO = { Fue: 'Fuerza', Des: 'Destreza', Con: 'Constitución', Int: 'Inteligencia', Sab: 'Sabiduría', Car: 'Carisma' };
+// Características de un personaje: se guardan en el perfil como pj.fue, pj.des, pj.con, pj.int, pj.sab, pj.car
+const CARS_PJ = [['fue', 'Fuerza'], ['des', 'Destreza'], ['con', 'Constitución'], ['int', 'Inteligencia'], ['sab', 'Sabiduría'], ['car', 'Carisma']];
 
 const IC = {
   atras: '<path d="M15 18l-6-6 6-6"/>',
@@ -103,7 +105,8 @@ const FURIAS = [0, 2, 2, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6];
 const ENEMIGO_PREDILECTO = [0, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6];
 const RECURSOS_CLASE = {
   barbaro: [{ clave: 'furia', nombre: 'Furia', desde: 1, max: n => FURIAS[n], descanso: 'uno' }],
-  bardo: [{ clave: 'inspiracion-bardica', nombre: 'Inspiración bárdica', desde: 1, max: () => 1, descanso: n => n >= 5 ? 'corto' : 'largo', nota: 'Usos = su modificador por Carisma (mínimo 1): ajústalo con + y −' }],
+  // Usos = modificador por Carisma, mínimo 1 (SRD, pág. 36)
+  bardo: [{ clave: 'inspiracion-bardica', nombre: 'Inspiración bárdica', desde: 1, max: (n, pj) => Math.max(1, modDe(pj && pj.car != null ? pj.car : 10)), descanso: n => n >= 5 ? 'corto' : 'largo', nota: 'Usos según su modificador por Carisma (mínimo 1)' }],
   clerigo: [{ clave: 'canalizar-divinidad', nombre: 'Canalizar divinidad', desde: 2, max: n => n >= 18 ? 4 : n >= 6 ? 3 : 2, descanso: 'uno' }],
   druida: [{ clave: 'forma-salvaje', nombre: 'Forma salvaje', desde: 2, max: n => n >= 17 ? 4 : n >= 6 ? 3 : 2, descanso: 'uno' }],
   explorador: [{ clave: 'enemigo-predilecto', nombre: 'Enemigo predilecto (marca del cazador sin espacio)', desde: 1, max: n => ENEMIGO_PREDILECTO[n], descanso: 'largo' }],
@@ -848,8 +851,13 @@ VISTAS.personaje = id => {
     ${campo('nombre', 'Nombre del personaje')}
     ${campo('jugador', 'Jugador (opcional)')}
     <div class="fila2">${campo('clase', 'Clase y especie', 'text', 'placeholder="p. ej. Pícaro elfo"')}${campo('nivel', 'Nivel', 'number', 'min="1" max="20"')}</div>
-    <div class="fila3">${campo('ca', 'CA', 'number')}${campo('pgMax', 'PG máximos', 'number')}${campo('des', 'Destreza', 'number', 'placeholder="puntuación"')}</div>
-    <p class="nota" id="pj-calc">Mod. de Destreza ${signo(modDe(pj.des))} · Bonificador por competencia ${signo(bcDeNivel(pj.nivel))}</p>
+    <div class="fila2">${campo('ca', 'CA', 'number')}${campo('pgMax', 'PG máximos', 'number')}</div>
+    <section class="bloque"><h2 style="font-size:1rem;margin:0 0 6px">Características</h2>
+      <div class="cars-pj">${CARS_PJ.map(([k, etq]) => `<label class="car-pj"><span>${etq}</span>
+        <input data-in="pj" data-ch="pjSync" data-k="${k}" type="number" inputmode="numeric" min="1" max="30" placeholder="10" value="${esc(pj[k] ?? '')}">
+        <b data-mod="${k}">${pj[k] != null ? signo(modDe(pj[k])) : '—'}</b></label>`).join('')}</div>
+      <p class="nota" id="pj-calc">Bonificador por competencia ${signo(bcDeNivel(pj.nivel))} (por su nivel)</p>
+    </section>
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 4px">Cómo se calcula su iniciativa</h2>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniDes" ${pj.iniDes !== false ? 'checked' : ''}> Sumar el modificador de Destreza</label>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="alerta" ${pj.alerta ? 'checked' : ''}><span>Tiene la dote <b>Alerta</b><small>Suma su BC a la iniciativa y puede intercambiarla con un aliado</small></span></label>
@@ -1201,6 +1209,12 @@ function htmlConjurosPJ(pj, pid) {
   return `<details class="sec-mon" data-k="conj-pj" open><summary>Conjuros <span class="cuenta">${lista.length}</span></summary>
     <div class="chips conj-chips">${lista.map(c => `<button class="chip conj" data-a="verConjuro" data-id="${c.id}" data-pj="${pj.id}" data-pid="${pid || ''}"><small>${c.nivel === 0 ? 'T' : c.nivel}</small>${esc(c.nombre)}${c.concentracion ? ' <em>C</em>' : ''}</button>`).join('')}</div></details>`;
 }
+// Modificadores del jugador en la ficha del combate (solo si se han rellenado sus características)
+function htmlCarsCombate(pj) {
+  if (!pj || !CARS_PJ.some(([k]) => pj[k] != null)) return '';
+  return `<div class="salvs" style="margin-top:10px" aria-label="Modificadores por característica"><span class="salv-tit">Características</span>
+    ${CARS_PJ.map(([k], i) => `<span class="salv-chip"><b>${CARS[i]}</b>${pj[k] != null ? signo(modDe(pj[k])) : '—'}</span>`).join('')}</div>`;
+}
 // Espacios de conjuro y recursos de un jugador. Se guardan en su PERFIL, así que se ven igual en todos los encuentros
 function htmlRecursosPJ(pj, modo) {
   if (!pj) return '';
@@ -1314,7 +1328,7 @@ function hojaParticipante(pid) {
     ${htmlReglas(enc, p)}
     ${htmlEfectosCausados(enc, p)}
     ${m ? htmlCombateMonstruo(m, p) : ''}
-    ${p.tipo === 'pj' ? htmlRecursosPJ(pjPorId(p.ref), 'combate') + htmlConjurosPJ(pjPorId(p.ref), p.id) : ''}
+    ${p.tipo === 'pj' ? htmlCarsCombate(pjPorId(p.ref)) + htmlRecursosPJ(pjPorId(p.ref), 'combate') + htmlConjurosPJ(pjPorId(p.ref), p.id) : ''}
     <div class="hp-sec"><div class="bloque-cab"><h4>Estados</h4><button class="btn peq" data-a="anadirEstado" data-pid="${p.id}">${ic(IC.mas)} Estado</button></div>
       ${filasEst || '<p class="nota">Sin estados.</p>'}</div>
     <div class="toggles">
@@ -1855,13 +1869,13 @@ A.rellenarEspacios = el => {
     e.max = Array.from({ length: 9 }, (_, i) => tabla[i] || 0);
     e.usados = e.usados.map((u, i) => Math.min(u || 0, e.max[i]));
   }
-  // Recursos de su clase con los usos de su nivel (el máximo de Inspiración bárdica lo pone el máster: depende del Carisma)
+  // Recursos de su clase con los usos de su nivel (la Inspiración bárdica, según su Carisma)
   const defs = (RECURSOS_CLASE[claseDe(pj.clase)] || []).filter(d => n >= d.desde);
   pj.recursos ||= [];
   for (const d of defs) {
     let r = pj.recursos.find(x => x.clave === d.clave);
-    if (!r) { r = { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n), usados: 0 }; pj.recursos.push(r); }
-    else if (d.clave !== 'inspiracion-bardica') r.max = d.max(n);
+    if (!r) { r = { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n, pj), usados: 0 }; pj.recursos.push(r); }
+    else r.max = d.max(n, pj);
     r.reserva = !!d.reserva; r.usados = Math.min(r.usados || 0, r.max);
   }
   const partes = [];
@@ -1879,7 +1893,7 @@ A.nuevoRecPJ = el => {
   const d = Object.values(RECURSOS_CLASE).flat().find(x => norm(x.nombre) === norm(nombre) || norm(x.nombre).startsWith(norm(nombre) + ' ('));
   if (d && pj.recursos.some(x => x.clave === d.clave)) return toast(`${d.nombre} ya está en su lista`);
   const n = Math.max(1, Math.min(20, pj.nivel || 1));
-  pj.recursos.push(d ? { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n), usados: 0, reserva: !!d.reserva } : { id: uid(), nombre, max: 1, usados: 0, descanso: 'largo' });
+  pj.recursos.push(d ? { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n, pj), usados: 0, reserva: !!d.reserva } : { id: uid(), nombre, max: 1, usados: 0, descanso: 'largo' });
   guardar(); refrescar();
   toast(d ? `${d.nombre}: ${TEXTO_REGLA[reglaRecurso({ clave: d.clave }, pj)]}` : `${nombre} añadido: ajusta los usos con + y − y el descanso con ⟳`);
 };
@@ -2173,7 +2187,8 @@ I.pj = el => {
   if (k === 'nivel' && pj.nivel != null) pj.nivel = Math.max(1, Math.min(20, pj.nivel));
   guardar();
   if (k === 'nombre') { $('#cabecera h1').textContent = pj.nombre || 'Personaje'; document.title = (pj.nombre || 'Personaje') + ' · Encuentros D&D'; }
-  const c = $('#pj-calc'); if (c) c.textContent = `Mod. de Destreza ${signo(modDe(pj.des))} · Bonificador por competencia ${signo(bcDeNivel(pj.nivel))}`;
+  const c = $('#pj-calc'); if (c) c.textContent = `Bonificador por competencia ${signo(bcDeNivel(pj.nivel))} (por su nivel)`;
+  const md = $(`[data-mod="${k}"]`); if (md) md.textContent = pj[k] != null ? signo(modDe(pj[k])) : '—';
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
 };
 I.fb = el => { FB[el.dataset.k] = el.value; actualizarResultados('fb'); };
@@ -2204,8 +2219,21 @@ C.pjchk = el => {
 // Al terminar de escribir un campo del perfil (al salir de la casilla)
 C.pjSync = el => {
   const pj = pjPorId(ruta().id); if (!pj) return;
-  if (el.dataset.k === 'nivel') el.value = pj.nivel ?? '';
-  sincronizarPJ(pj, el.dataset.k);
+  const k = el.dataset.k;
+  if (k === 'nivel') el.value = pj.nivel ?? '';
+  // Al escribir la clase, que aparezca (o desaparezca) el botón de rellenar según la clase
+  if (k === 'clase') { sincronizarPJ(pj, k); refrescar(); return; }
+  // Características: entre 1 y 30 (SRD)
+  if (CARS_PJ.some(([c]) => c === k) && pj[k] != null) {
+    pj[k] = Math.max(1, Math.min(30, pj[k])); el.value = pj[k]; guardar();
+    const md = $(`[data-mod="${k}"]`); if (md) md.textContent = signo(modDe(pj[k]));
+  }
+  // La Inspiración bárdica cambia sola con el Carisma
+  if (k === 'car') {
+    const r = (pj.recursos || []).find(x => x.clave === 'inspiracion-bardica');
+    if (r) { const d = defRecurso(r); r.max = d.max(pj.nivel || 1, pj); r.usados = Math.min(r.usados || 0, r.max); guardar(); refrescar(); toast(`Inspiración bárdica: ${r.max} uso${r.max === 1 ? '' : 's'} (Carisma ${signo(modDe(pj.car))})`); }
+  }
+  sincronizarPJ(pj, k);
 };
 // Lleva los cambios del perfil a los encuentros donde ya está ese personaje
 function sincronizarPJ(pj, k) {
