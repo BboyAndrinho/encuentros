@@ -252,8 +252,39 @@ function instantanea(enc) {
 }
 function accionCombate(enc, fn) {
   instantanea(enc);
-  try { fn(); }
+  try {
+    fn();
+    if (enc.combate) { const av = []; revisarVinculos(enc, av); if (av.length) enc.combate.avisos = [...av, ...(enc.combate.avisos || [])]; }
+  }
   finally { guardar(); refrescar(); }
+}
+// Reglas del SRD que se aplican solas tras cada acción del combate:
+// · la concentración se pierde al quedar incapacitado o morir (Glosario, «Concentración»);
+// · un estado vinculado termina si quien lo causa pierde la concentración, o queda incapacitado o cae
+//   (p. ej. «el estado de agarrado también termina si quien agarra tiene el estado de incapacitado»).
+const estaIncapacitado = p => p.pg === 0 || p.derrotado || p.estados.some(s => INCAPACITANTES.has(s.id));
+function revisarVinculos(enc, av) {
+  for (const p of enc.participantes) {
+    if (p.conc && estaIncapacitado(p)) {
+      p.conc = false;
+      av.push({ t: `${p.nombre} pierde la concentración (${p.pg === 0 || p.derrotado ? 'ha caído' : 'está incapacitado'})`, tipo: 'info' });
+      registrar(enc, `${p.nombre} pierde la concentración`);
+    }
+  }
+  for (const p of enc.participantes) {
+    p.estados = p.estados.filter(s => {
+      if (!s.origen || !s.vinculo) return true;
+      const o = partPorId(enc, s.origen);
+      let motivo = '';
+      if (!o) motivo = 'quien lo causaba ya no está en el combate';
+      else if (s.vinculo === 'conc' && !o.conc) motivo = `${o.nombre} ha perdido la concentración`;
+      else if (s.vinculo === 'cae' && estaIncapacitado(o)) motivo = o.pg === 0 || o.derrotado ? `${o.nombre} ha caído` : `${o.nombre} está incapacitado`;
+      if (!motivo) return true;
+      av.push({ t: `${p.nombre}: termina «${s.nombre}» porque ${motivo}`, tipo: 'bueno' });
+      registrar(enc, `Termina «${s.nombre}» en ${p.nombre} (${motivo})`);
+      return false;
+    });
+  }
 }
 function registrar(enc, t) {
   const c = enc.combate; if (!c) return;
@@ -620,7 +651,7 @@ VISTAS.encuentro = id => {
   const pjs = enc.participantes.filter(p => p.tipo === 'pj');
   const otros = enc.participantes.filter(p => p.tipo !== 'pj');
   const html = `
-  ${enc.combate ? `<div class="aviso"><span>Este encuentro tiene un combate en curso (asalto ${enc.combate.asalto}).</span></div>` : ''}
+  ${enc.combate ? `<div class="aviso"><span>Este encuentro tiene un combate en curso (asalto ${enc.combate.asalto}).</span></div>` : htmlResumen(enc.resumen)}
   <label class="campo"><span>Nombre del encuentro</span><input data-in="encNombre" value="${esc(enc.nombre)}"></label>
   ${htmlDificultad(dificultad(enc))}
   <section class="bloque">
@@ -951,6 +982,59 @@ VISTAS.ajustes = () => ({
 });
 
 // ============ Hojas concretas ============
+// ---- Recordatorio de reglas de los estados (resumen fiel del Glosario del SRD 5.2.1, págs. 194-205) ----
+const INCAP_TXT = 'No puede hacer acciones, acciones adicionales ni reacciones; no puede hablar';
+const REGLAS = {
+  agarrado: { vel0: 1, sus: o => [`Desventaja al atacar a cualquiera que no sea ${o || 'quien le agarra'}`], otros: o => [`${o || 'Quien le agarra'} puede arrastrarle (cada metro le cuesta 1 m más)`] },
+  apresado: { vel0: 1, contra: 'Ventaja', sus: () => ['Desventaja en sus tiradas de ataque'], ts: ['Desventaja en las TS de Destreza'] },
+  asustado: { sus: o => [`Desventaja en ataques y pruebas de característica mientras vea a ${o || 'la fuente de su miedo'}`], mov: o => [`No puede acercarse voluntariamente a ${o || 'la fuente de su miedo'}`] },
+  aturdido: { incap: 1, contra: 'Ventaja', ts: ['Falla automáticamente las TS de Fuerza y Destreza'] },
+  cegado: { contra: 'Ventaja', sus: () => ['Desventaja en sus tiradas de ataque', 'Falla las pruebas que requieran ver'] },
+  derribado: { contraTxt: 'Ventaja si el atacante está a 1,5 m o menos; desventaja si está más lejos', sus: () => ['Desventaja en sus tiradas de ataque'], mov: () => ['Solo puede arrastrarse, o levantarse gastando la mitad de su velocidad (no puede si su velocidad es 0)'] },
+  ensordecido: { otros: () => ['No oye: falla las pruebas que requieran oír'] },
+  envenenado: { sus: () => ['Desventaja en tiradas de ataque y pruebas de característica'] },
+  hechizado: { sus: o => [`No puede atacar ni elegir como objetivo de efectos dañinos o mágicos a ${o || 'quien le hechizó'}`], otros: o => [`${o || 'Quien le hechizó'} tiene ventaja en pruebas sociales con él`] },
+  incapacitado: { incap: 1 },
+  inconsciente: { incap: 1, vel0: 1, contra: 'Ventaja', crit: 1, ts: ['Falla automáticamente las TS de Fuerza y Destreza'], otros: () => ['Está derribado y suelta lo que sujeta (seguirá derribado al despertar)'] },
+  invisible: { contraTxt: 'Desventaja (salvo para quien pueda verle)', sus: () => ['Ventaja en sus tiradas de ataque (salvo contra quien pueda verle)'], otros: () => ['No le afectan los efectos que requieran verle'] },
+  paralizado: { incap: 1, vel0: 1, contra: 'Ventaja', crit: 1, ts: ['Falla automáticamente las TS de Fuerza y Destreza'] },
+  petrificado: { incap: 1, vel0: 1, contra: 'Ventaja', ts: ['Falla automáticamente las TS de Fuerza y Destreza'], otros: () => ['Resistencia a todo el daño', 'Inmune al estado de envenenado'] }
+};
+function htmlReglas(enc, p) {
+  const contra = new Set(), sus = new Set(), ts = new Set(), mov = new Set(), acc = new Set(), otros = new Set();
+  let crit = false;
+  for (const s of p.estados) {
+    const r = REGLAS[s.id];
+    const o = s.origen && partPorId(enc, s.origen) ? partPorId(enc, s.origen).nombre : '';
+    if (s.id === 'cansancio') {
+      const n = s.nivel || 1;
+      sus.add(`−${2 * n} a todas sus pruebas con d20 (ataques, TS y pruebas)`);
+      mov.add(`Velocidad reducida en ${String(1.5 * n).replace('.', ',')} m`);
+      if (n >= 6) otros.add('Con nivel 6 de cansancio, muere');
+      continue;
+    }
+    if (!r) continue;
+    if (r.contra) contra.add(r.contra);
+    if (r.contraTxt) contra.add(r.contraTxt);
+    if (r.crit) crit = true;
+    if (r.incap) { acc.add(INCAP_TXT); acc.add('Pierde la concentración'); }
+    if (r.vel0) mov.add('Velocidad 0');
+    (r.sus ? r.sus(o) : []).forEach(x => sus.add(x));
+    (r.ts || []).forEach(x => ts.add(x));
+    (r.mov ? r.mov(o) : []).forEach(x => mov.add(x));
+    (r.otros ? r.otros(o) : []).forEach(x => otros.add(x));
+  }
+  if (contra.has('Ventaja')) [...contra].filter(x => x.startsWith('Ventaja si')).forEach(x => contra.delete(x)); // ya tiene ventaja siempre
+  if (mov.has('Velocidad 0')) [...mov].filter(x => x !== 'Velocidad 0' && !/Velocidad reducida/.test(x)).forEach(x => x.startsWith('Solo puede') && mov.delete(x));
+  const filas = [
+    ['Atacarle', [...contra].concat(crit ? ['Si le aciertan a 1,5 m o menos: crítico automático'] : [])],
+    ['Sus ataques', [...sus]], ['Salvaciones', [...ts]], ['Movimiento', [...mov]], ['Acciones', [...acc]], ['Además', [...otros]]
+  ].filter(([, v]) => v.length);
+  if (!filas.length) return '';
+  return `<div class="reglas-box"><div class="reglas-tit">Recuerda (reglas de sus estados)</div>
+    ${filas.map(([k, v]) => `<div class="regla-fila"><b>${k}</b><span>${v.map(esc).join(' · ')}</span></div>`).join('')}</div>`;
+}
+
 // ---- Lo que necesita el máster de un enemigo en pleno combate ----
 function filaAccion(e, k) {
   const a = analizarEntrada(e);
@@ -991,6 +1075,18 @@ function htmlConjurosPJ(pj) {
     <div class="chips conj-chips">${lista.map(c => `<button class="chip conj" data-a="verConjuro" data-id="${c.id}"><small>${c.nivel === 0 ? 'T' : c.nivel}</small>${esc(c.nombre)}${c.concentracion ? ' <em>C</em>' : ''}</button>`).join('')}</div></details>`;
 }
 
+// Estados que esta criatura ha causado a otras (p. ej. el osgo: «Agarrado» en Thorin), para soltarlos desde aquí
+function htmlEfectosCausados(enc, p) {
+  const lista = [];
+  for (const q of enc.participantes) for (const s of q.estados) if (s.origen === p.id) lista.push({ q, s });
+  if (!lista.length) return '';
+  return `<div class="hp-sec causados"><h4>Efectos que causa</h4>
+    ${lista.map(({ q, s }) => `<div class="fila-est"><div class="est-txt"><b>${esc(s.nombre)}</b> en ${esc(q.nombre)}
+      <span class="est-dur">${s.vinculo === 'conc' ? 'Depende de su concentración' : s.vinculo === 'cae' ? 'Termina si queda incapacitado o cae' : 'No depende de él'}${s.rondas != null ? ` · quedan ${s.rondas}` : ''}</span></div>
+      <div class="est-acc"><button class="btn mini" data-a="quitarEstado" data-pid="${q.id}" data-uid="${s.uid}">${s.id === 'agarrado' ? 'Soltar' : 'Terminar'}</button></div></div>`).join('')}
+  </div>`;
+}
+
 function hojaParticipante(pid) {
   const encId = ruta().id;
   abrirHoja(() => {
@@ -1005,7 +1101,8 @@ function hojaParticipante(pid) {
         ? `<button class="icono peq" data-a="estNivel" data-pid="${p.id}" data-uid="${s.uid}" data-d="-1">−</button><b>${s.nivel || 1}</b><button class="icono peq" data-a="estNivel" data-pid="${p.id}" data-uid="${s.uid}" data-d="1">+</button>`
         : s.rondas != null ? `<button class="icono peq" data-a="estRondas" data-pid="${p.id}" data-uid="${s.uid}" data-d="-1">−</button><b>${s.rondas}</b><button class="icono peq" data-a="estRondas" data-pid="${p.id}" data-uid="${s.uid}" data-d="1">+</button>` : '';
       return `<div class="fila-est"><div class="est-txt">${EST.has(s.id) ? `<button class="est-nom" data-a="verEstado" data-id="${s.id}">${esc(s.nombre)}</button>` : `<b>${esc(s.nombre)}</b>`}${s.id === 'cansancio' ? ` (nivel ${s.nivel || 1})` : ''}
-        <span class="est-dur">${dur}${s.ts ? ` · TS de ${CARS_LARGO[s.ts.car]}${s.ts.cd ? ' CD ' + s.ts.cd : ''}` : ''}${s.nota ? ' · ' + esc(s.nota) : ''}</span></div>
+        <span class="est-dur">${dur}${s.ts ? ` · TS de ${CARS_LARGO[s.ts.car]}${s.ts.cd ? ' CD ' + s.ts.cd : ''}` : ''}${s.nota ? ' · ' + esc(s.nota) : ''}</span>
+        ${s.origen && partPorId(enc, s.origen) ? `<span class="est-dur est-origen">Lo causa ${esc(partPorId(enc, s.origen).nombre)}${s.vinculo === 'conc' ? ' · termina si pierde la concentración' : s.vinculo === 'cae' ? ' · termina si queda incapacitado o cae' : ''}</span>` : ''}</div>
         <div class="est-acc">${ctrl}<button class="icono peq" data-a="quitarEstado" data-pid="${p.id}" data-uid="${s.uid}" aria-label="Quitar estado">${ic(IC.cerrar)}</button></div></div>`;
     }).join('');
     const muerte = p.tipo === 'pj' && p.pg === 0 ? `<div class="muerte">
@@ -1024,6 +1121,8 @@ function hojaParticipante(pid) {
       <button class="btn" data-a="pgAccion" data-q="temp" data-pid="${p.id}">Temp.</button>
     </div>
     ${muerte}
+    ${htmlReglas(enc, p)}
+    ${htmlEfectosCausados(enc, p)}
     ${m ? htmlCombateMonstruo(m) : ''}
     ${p.tipo === 'pj' ? htmlConjurosPJ(pjPorId(p.ref)) : ''}
     <div class="hp-sec"><div class="bloque-cab"><h4>Estados</h4><button class="btn peq" data-a="anadirEstado" data-pid="${p.id}">${ic(IC.mas)} Estado</button></div>
@@ -1115,6 +1214,8 @@ function hojaEditar(pid) {
 function hojaEstado(pidInicial) {
   const enc = encActual(); if (!enc) return;
   const ps = enc.participantes;
+  // Quien lo causa, por defecto: la criatura a la que le toca (si no es el propio objetivo)
+  const origenDefecto = enc.combate && enc.combate.turnoId !== pidInicial ? enc.combate.turnoId : '';
   const h = abrirHoja(() => `<div class="hp-cab"><div><h3>Añadir estado</h3></div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div>
     <div class="rejilla-est" id="fe-estados">${SRD.estados.map(e => `<button class="opc" data-a="feEst" data-id="${e.id}">${esc(e.nombre)}</button>`).join('')}<button class="opc" data-a="feEst" data-id="otro">Otro efecto…</button></div>
     <label class="campo oculto" id="fe-otro"><span>Nombre del efecto</span><input id="fe-nombre" placeholder="p. ej. Bendecido, Marca del cazador, Ardiendo"></label>
@@ -1130,10 +1231,29 @@ function hojaEstado(pidInicial) {
       <label class="campo"><span>TS al final de su turno</span><select id="fe-ts"><option value="">No repite tirada</option>${CARS.map(c => `<option value="${c}">${CARS_LARGO[c]}</option>`).join('')}</select></label>
       <label class="campo"><span>CD</span><input id="fe-cd" type="number" inputmode="numeric" placeholder="p. ej. 14"></label>
     </div>
-    <label class="campo"><span>Nota (origen, opcional)</span><input id="fe-nota" placeholder="p. ej. Conjuro de Elara"></label>
+    <div class="vinculo">
+      <label class="campo"><span>Lo causa</span><select id="fe-origen" data-ch="feOrigen"><option value="">Nadie en concreto</option>${ps.map(p => `<option value="${p.id}" ${p.id === origenDefecto ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}</select></label>
+      <label class="campo"><span>Termina antes si quien lo causa…</span><select id="fe-vinc" data-ch="feVinc">
+        <option value="">(no depende de él)</option>
+        <option value="conc">…pierde la concentración</option>
+        <option value="cae">…queda incapacitado o cae</option>
+      </select></label>
+      <p class="nota" style="margin:0">Así, si el fanático pierde la concentración o cae el osgo que agarra, la app quita el estado sola.</p>
+    </div>
+    <label class="campo"><span>Nota (opcional)</span><input id="fe-nota" placeholder="p. ej. Inmovilizar persona · CD 12 para escapar"></label>
     <div class="campo"><span>Aplicar a</span><div class="chips" id="fe-obj">${ps.filter(p => !p.derrotado || p.id === pidInicial).map(p => `<button class="chip ${p.id === pidInicial ? 'on' : ''}" data-a="selChip" data-id="${p.id}">${esc(p.nombre)}</button>`).join('')}</div></div>
     <button class="btn primario ancho" data-a="feOk">Añadir estado</button>`, { fija: true });
-  h.encId = enc.id; h.estadoSel = null;
+  h.encId = enc.id; h.estadoSel = null; h.vincManual = false;
+}
+// Propuesta automática de «termina si…»: el agarre acaba si quien agarra queda incapacitado (SRD);
+// si quien lo causa se está concentrando, lo normal es que dependa de su concentración
+function proponerVinculo(h) {
+  if (h.vincManual) return;
+  const enc = encPorId(h.encId); const o = partPorId(enc, $('#fe-origen', h.el).value);
+  let v = '';
+  if (o && h.estadoSel === 'agarrado') v = 'cae';
+  else if (o && o.conc) v = 'conc';
+  $('#fe-vinc', h.el).value = v;
 }
 
 function hojaArea() {
@@ -1377,6 +1497,7 @@ A.iniciarCombate = async () => {
     if (r !== 'fija') return;
     for (const p of sin) p.ini.tirada = 10;
   }
+  delete enc.resumen;
   iniciarCombate(enc);
   enc.mod = Date.now(); guardar();
   navegar('#/combate/' + enc.id);
@@ -1438,6 +1559,7 @@ A.feEst = el => {
   $('#fe-otro', h.el).classList.toggle('oculto', h.estadoSel !== 'otro');
   $('#fe-nivel', h.el).classList.toggle('oculto', h.estadoSel !== 'cansancio');
   if (h.estadoSel === 'otro') setTimeout(() => $('#fe-nombre', h.el).focus(), 50);
+  proponerVinculo(h);
 };
 A.feDur = el => {
   const h = hojaActual();
@@ -1458,10 +1580,16 @@ A.feOk = () => {
     momento: $('#fe-mom', h.el).value,
     cuentaEn: $('#fe-cuenta', h.el).value || null,
     ts: car ? { car, cd: num($('#fe-cd', h.el).value) } : null,
-    nota: $('#fe-nota', h.el).value.trim()
+    nota: $('#fe-nota', h.el).value.trim(),
+    origen: $('#fe-origen', h.el).value || null,
+    vinculo: $('#fe-vinc', h.el).value || null
   };
+  if (datos.vinculo && !datos.origen) return toast('Elige quién lo causa');
+  const origen = partPorId(enc, datos.origen);
   const inmunes = [];
   accionCombate(enc, () => {
+    // Si depende de la concentración de quien lo causa, esa criatura empieza a concentrarse
+    if (datos.vinculo === 'conc' && origen && !origen.conc) { origen.conc = true; registrar(enc, `${origen.nombre} empieza a concentrarse`); }
     for (const p of objetivos) {
       let s;
       if (h.estadoSel === 'otro') s = nuevoEstado('otro', Object.assign({ nombre: nombreOtro }, datos));
@@ -1599,6 +1727,7 @@ A.areaOk = el => {
   toast(el.dataset.q === 'danio' ? 'Daño aplicado' : 'Curación aplicada');
 };
 A.menuCombate = () => hojaMenuCombate();
+A.cerrarResumen = () => { const enc = encActual(); if (!enc) return; delete enc.resumen; guardar(); refrescar(); };
 A.reordenar = () => { modoReordenar = true; hojaActual().cerrar(); render(); };
 A.finReordenar = () => { modoReordenar = false; render(); };
 A.reordenarIni = () => {
@@ -1626,10 +1755,44 @@ A.terminarCombate = async () => {
   const hm = hojaActual(); if (hm) hm.cerrar();
   const ok = await preguntar('¿Terminar el combate? Se conservan los PG y estados actuales; puedes restablecerlos después.', [{ t: 'Terminar combate', v: true, clase: 'peligro' }, { t: 'Cancelar' }]);
   if (!ok) return;
+  enc.resumen = resumenCombate(enc);
   enc.combate = null; modoReordenar = false; delete pilasDeshacer[enc.id]; guardar();
   toast('Combate terminado');
   navegar('#/encuentro/' + enc.id);
 };
+// Resumen del combate (sin experiencia): asaltos, enemigos, cómo acaba cada jugador y qué sigue activo
+function resumenCombate(enc) {
+  const c = enc.combate; const log = c.log || [];
+  const recibido = {}, curado = {}, caidas = {};
+  for (const l of log) {
+    let m = l.t.match(/^(.+) recibe (\d+) de daño \((\d+) → (\d+) PG\)$/);
+    if (m) { recibido[m[1]] = (recibido[m[1]] || 0) + +m[2]; if (+m[3] > 0 && +m[4] === 0) caidas[m[1]] = (caidas[m[1]] || 0) + 1; continue; }
+    m = l.t.match(/^(.+) se cura (\d+) \(/);
+    if (m) curado[m[1]] = (curado[m[1]] || 0) + +m[2];
+  }
+  const enemigos = enc.participantes.filter(p => p.tipo !== 'pj' && !p.aliado);
+  return {
+    asaltos: c.asalto,
+    enemigos: { derrotados: enemigos.filter(p => p.derrotado).length, total: enemigos.length },
+    jugadores: enc.participantes.filter(p => p.tipo === 'pj').map(p => ({
+      nombre: p.nombre, pg: p.pg, pgMax: p.pgMax, muerto: muertoPJ(p),
+      caidas: caidas[p.nombre] || 0, recibido: recibido[p.nombre] || 0, curado: curado[p.nombre] || 0
+    })),
+    activos: enc.participantes.filter(p => !p.derrotado && (p.conc || p.estados.length)).map(p => ({
+      nombre: p.nombre, conc: p.conc,
+      estados: p.estados.map(s => s.nombre + (s.nivel ? ' ' + s.nivel : '') + (s.rondas != null ? ` (${s.rondas} turnos)` : ''))
+    }))
+  };
+}
+function htmlResumen(r) {
+  if (!r) return '';
+  return `<div class="resumen-combate"><h3>Resumen del último combate <button class="icono peq" data-a="cerrarResumen" aria-label="Ocultar resumen">${ic(IC.cerrar)}</button></h3>
+    <p>${r.asaltos} asalto${r.asaltos === 1 ? '' : 's'} · enemigos derrotados: <b>${r.enemigos.derrotados} de ${r.enemigos.total}</b></p>
+    <ul>${r.jugadores.map(j => `<li><b>${esc(j.nombre)}</b>: ${j.muerto ? '<b style="color:var(--peligro)">muerto</b>' : `${j.pg}/${j.pgMax} PG`} · recibió ${j.recibido}${j.curado ? `, curado ${j.curado}` : ''}${j.caidas ? ` · cayó a 0 PG ${j.caidas === 1 ? 'una vez' : j.caidas + ' veces'}` : ''}</li>`).join('')}</ul>
+    ${r.activos.length ? `<p><b>Sigue activo</b> (decide tú si continúa fuera del combate):</p>
+      <ul>${r.activos.map(a => `<li><b>${esc(a.nombre)}</b>: ${[a.conc ? 'concentrado en un conjuro' : '', ...a.estados.map(esc)].filter(Boolean).join(', ')}</li>`).join('')}</ul>` : ''}
+  </div>`;
+}
 
 // --- Personajes
 A.nuevoPJ = () => {
@@ -1697,6 +1860,8 @@ function actualizarResultados(clave) {
   else { const h = hojaActual(); const r = h && $('#res-fa', h.el); if (r) r.innerHTML = htmlResultadosAnadir(); }
 }
 const C = {};
+C.feOrigen = () => { const h = hojaActual(); if (h) proponerVinculo(h); };
+C.feVinc = () => { const h = hojaActual(); if (h) h.vincManual = true; };
 C.pjchk = el => {
   const pj = pjPorId(ruta().id); if (!pj) return;
   const k = el.dataset.k;

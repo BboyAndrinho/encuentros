@@ -395,6 +395,23 @@ details.accion > summary { padding: 8px 10px; cursor: pointer; list-style: none;
 .fila:disabled { opacity: .5; cursor: default; }
 .lista .etq, .resumen .etq { padding: 0 6px; font-size: .68rem; vertical-align: 1px; }
 
+/* ===== Recordatorio de reglas y vínculos ===== */
+.reglas-box {
+  margin: 12px 0; padding: 10px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--aviso) 12%, var(--superficie)); border: 1px solid color-mix(in srgb, var(--aviso) 40%, transparent);
+}
+.reglas-tit { font-size: .75rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--aviso); margin-bottom: 4px; }
+.regla-fila { display: grid; grid-template-columns: 92px 1fr; gap: 8px; padding: 3px 0; font-size: .86rem; }
+.regla-fila b { color: var(--suave); font-weight: 700; }
+.est-origen { color: var(--pj); }
+.vinculo { padding: 4px 12px; margin: 8px 0; border-radius: 12px; background: var(--superficie2); }
+.vinculo .campo { margin: 8px 0; }
+.causados .fila-est b { margin-right: 2px; }
+.resumen-combate { padding: 12px 14px; border-radius: 14px; background: var(--superficie); border: 1px solid var(--borde); border-left: 4px solid var(--turno); margin: 10px 0; }
+.resumen-combate h3 { margin: 0 0 6px; font-size: 1rem; display: flex; justify-content: space-between; align-items: center; }
+.resumen-combate p { margin: 4px 0; font-size: .9rem; }
+.resumen-combate ul { margin: 4px 0; padding-left: 18px; font-size: .9rem; }
+
 /* ===== Reglas de estados ===== */
 details.regla { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; margin: 8px 0; }
 details.regla summary { padding: 14px 16px; font-weight: 700; cursor: pointer; list-style: none; display: flex; justify-content: space-between; }
