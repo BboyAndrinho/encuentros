@@ -155,6 +155,8 @@ function completar(d) {
   d.personajes ||= [];
   d.encuentros ||= [];
   d.ajustes ||= { pantalla: true };
+  // En el perfil, sumar el BC a la iniciativa depende solo de la dote Alerta
+  for (const pj of d.personajes) pj.iniBC = !!pj.alerta;
   return d;
 }
 function guardar() {
@@ -809,7 +811,6 @@ VISTAS.personaje = id => {
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 4px">Cómo se calcula su iniciativa</h2>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniDes" ${pj.iniDes !== false ? 'checked' : ''}> Sumar el modificador de Destreza</label>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="alerta" ${pj.alerta ? 'checked' : ''}> Tiene la dote <b>Alerta</b> (suma su BC y puede intercambiar la iniciativa con un aliado)</label>
-      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniBC" ${pj.iniBC ? 'checked' : ''}> Sumar el bonificador por competencia</label>
       ${campo('iniExtra', 'Otros bonificadores a la iniciativa', 'number', 'placeholder="0"')}
       <p class="nota" id="pj-ini">${esc(resumenIniPJ(pj))}</p>
     </section>
@@ -2103,12 +2104,8 @@ C.pjchk = el => {
   const pj = pjPorId(ruta().id); if (!pj) return;
   const k = el.dataset.k;
   pj[k] = el.checked;
-  // La dote Alerta suma el bonificador por competencia a la iniciativa
-  if (k === 'alerta' && el.checked && !pj.iniBC) {
-    pj.iniBC = true;
-    const bc = $('[data-ch="pjchk"][data-k="iniBC"]'); if (bc) bc.checked = true;
-    sincronizarPJ(pj, 'iniBC');
-  }
+  // La dote Alerta suma el bonificador por competencia a la iniciativa: van siempre juntos
+  if (k === 'alerta') { pj.iniBC = el.checked; sincronizarPJ(pj, 'iniBC'); }
   guardar();
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
   sincronizarPJ(pj, k);
