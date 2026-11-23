@@ -689,7 +689,7 @@ function ruta() {
   const partes = (location.hash || '#/encuentros').slice(2).split('/');
   return { v: decodeURIComponent(partes[0] || 'encuentros'), id: partes[1] ? decodeURIComponent(partes[1]) : null };
 }
-const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', conjuros: 'conjuros', conjuro: 'conjuros', estados: 'estados' };
+const TAB_DE = { encuentros: 'encuentros', encuentro: 'encuentros', combate: 'encuentros', ajustes: 'encuentros', personajes: 'personajes', personaje: 'personajes', crear: 'personajes', bestiario: 'bestiario', monstruo: 'bestiario', conjuros: 'conjuros', conjuro: 'conjuros', estados: 'estados' };
 let ultimaRuta = '', desplazarAlTurno = false, modoReordenar = false;
 function render() {
   const r = ruta();
@@ -838,7 +838,8 @@ VISTAS.combate = id => {
 
 VISTAS.personajes = () => {
   const lista = E.personajes.slice().sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  const html = `<button class="btn primario ancho" data-a="nuevoPJ">${ic(IC.mas)} Nuevo personaje</button>
+  const html = `<button class="btn primario ancho" data-a="crearPJ">${ic(IC.mas)} ${E.borradorPJ && (E.borradorPJ.clase || E.borradorPJ.paso) ? 'Seguir creando personaje' : 'Crear personaje paso a paso'}</button>
+  <button class="btn ancho peq" data-a="nuevoPJ" style="margin-top:0">Perfil rápido (solo datos de combate)</button>
   ${lista.length ? `<div class="lista">${lista.map(pj => `<a class="fila" href="#/personaje/${pj.id}"><div class="f-txt"><div class="f-tit">${esc(pj.nombre)}</div>
     <div class="f-sub">${esc([pj.clase, 'nivel ' + (pj.nivel || 1), pj.jugador && 'jugado por ' + pj.jugador].filter(Boolean).join(' · '))}</div></div>
     <div class="f-vd">CA ${pj.ca ?? '—'} · PG ${pj.pgMax ?? '—'}</div></a>`).join('')}</div>`
@@ -2171,6 +2172,370 @@ function htmlResumen(r) {
   </div>`;
 }
 
+// ============ Creador de personajes (SRD 5.2.1, paso a paso) ============
+const CR = window.CREACION || null;
+const WZ_PASOS = ['Clase', 'Trasfondo', 'Especie', 'Características', 'Alineamiento', 'Detalles', 'Resumen'];
+const CAR_NOMBRE = Object.fromEntries(CARS_PJ);
+const CAR_ABR = Object.fromEntries(CARS_PJ.map(([k], i) => [k, CARS[i]]));
+const wzNuevo = () => ({
+  paso: 0, clase: null, habClase: [], equipoClase: 'A', trasfondo: null, equipoTras: 'A',
+  especie: null, linaje: null, tamano: null, aptitud: null, habEspecie: null, doteHumano: null, habDote: [],
+  tiradas: ['', '', '', '', '', ''], orden: null, modoBonus: '21', bonus2: null, bonus1: null,
+  alineamiento: null, nombre: '', jugador: '', descripcion: '', personalidad: '', idiomas: []
+});
+const WZ = () => E.borradorPJ;
+const wzClase = () => CR.clases.find(c => c.id === WZ().clase);
+const wzTras = () => CR.trasfondos.find(t => t.id === WZ().trasfondo);
+const wzEsp = () => CR.especies.find(e => e.id === WZ().especie);
+const wzLinaje = () => { const e = wzEsp(); return e && e.linaje ? e.linaje.opciones.find(o => o.id === WZ().linaje) : null; };
+const doteSRD = id => CR.dotes.find(d => d.id === id);
+// Armaduras que aparecen en el equipo inicial de las clases (SRD 5.2.1, tabla «Armaduras»)
+const ARMADURAS_INICIALES = [
+  { re: /cuero tachonado/, nombre: 'armadura de cuero tachonado', base: 12, maxDes: 99 },
+  { re: /armadura de cuero/, nombre: 'armadura de cuero', base: 11, maxDes: 99 },
+  { re: /camisa de malla/, nombre: 'camisa de malla', base: 13, maxDes: 2 },
+  { re: /cota de malla/, nombre: 'cota de malla', base: 16, maxDes: 0 }
+];
+const dadoGolpe = c => +String(c.dado).replace(/^\d*d/i, '') || 8;
+const nHabClase = c => c.habilidades.n || (c.habilidades.cualquiera ? 3 : 2);
+const opcionesHabClase = c => c.habilidades.cualquiera ? CR.habilidades.map(h => h.nombre) : c.habilidades.opciones;
+// Orden de preferencia de las características: por defecto, el reparto que el SRD recomienda para la clase
+function wzOrden() {
+  const w = WZ(); if (w.orden) return w.orden;
+  const ord = CR.puntuaciones.ordenCar, v = CR.puntuaciones.conjuntoPorClase[w.clase];
+  return v ? ord.slice().sort((a, b) => v[ord.indexOf(b)] - v[ord.indexOf(a)]) : ord.slice();
+}
+const tiradasValidas = () => WZ().tiradas.map(x => x === '' ? NaN : +x).filter(n => Number.isInteger(n) && n >= 3 && n <= 18);
+function wzBase() {
+  const t = tiradasValidas(); if (t.length < 6) return null;
+  const s = t.slice().sort((a, b) => b - a), o = wzOrden();
+  return Object.fromEntries(o.map((k, i) => [k, s[i]]));
+}
+function wzBonus() {
+  const w = WZ(), tr = wzTras(); if (!tr) return {};
+  const c = tr.caracteristicas;
+  if (w.modoBonus === '111') return Object.fromEntries(c.map(k => [k, 1]));
+  const o = wzOrden(), pref = c.slice().sort((a, b) => o.indexOf(a) - o.indexOf(b));
+  const b2 = c.includes(w.bonus2) ? w.bonus2 : pref[0];
+  const b1 = c.includes(w.bonus1) && w.bonus1 !== b2 ? w.bonus1 : pref.find(k => k !== b2);
+  return { [b2]: 2, [b1]: 1 };
+}
+function wzFinal() {
+  const b = wzBase(); if (!b) return null;
+  const bo = wzBonus();
+  return Object.fromEntries(CARS_PJ.map(([k]) => [k, Math.min(20, b[k] + (bo[k] || 0))]));
+}
+// Habilidades con competencia y de dónde vienen
+function wzCompetencias() {
+  const w = WZ(), m = new Map();
+  const add = (n, origen) => { if (n && !m.has(norm(n))) m.set(norm(n), { nombre: n, origen }); };
+  (w.habClase || []).forEach(n => add(n, 'clase'));
+  const tr = wzTras(); if (tr) tr.habilidades.forEach(n => add(n, 'trasfondo'));
+  add(w.habEspecie, 'especie');
+  if (w.doteHumano === 'habilidoso') (w.habDote || []).forEach(n => add(n, 'dote'));
+  return m;
+}
+function wzDotes() {
+  const w = WZ(), tr = wzTras(), l = [];
+  if (tr) l.push({ id: tr.doteId, nombre: tr.dote, origen: 'trasfondo' });
+  if (w.especie === 'humano' && w.doteHumano) { const d = doteSRD(w.doteHumano); if (d) l.push({ id: d.id, nombre: d.nombre, origen: 'especie' }); }
+  return l;
+}
+function wzFalta(p) {
+  const w = WZ(), c = wzClase(), e = wzEsp();
+  if (p === 0) { if (!c) return 'Elige una clase'; if (w.habClase.length !== nHabClase(c)) return `Elige ${nHabClase(c)} habilidades de la clase`; }
+  if (p === 1) {
+    const t = wzTras(); if (!t) return 'Elige un trasfondo';
+    const rep = t.habilidades.filter(h => w.habClase.some(x => norm(x) === norm(h)));
+    if (rep.length) return `${rep.join(' y ')} se repite: cámbiala en el paso de clase`;
+  }
+  if (p === 2) {
+    if (!e) return 'Elige una especie';
+    if (e.linaje && !wzLinaje()) return `Elige: ${e.linaje.rasgo}`;
+    if (e.linaje && e.linaje.aptitud && !w.aptitud) return 'Elige la aptitud mágica de su linaje';
+    if (e.tamanos.length > 1 && !w.tamano) return 'Elige su tamaño';
+    if ((e.id === 'elfo' || e.id === 'humano') && !w.habEspecie) return 'Elige la habilidad que da su especie';
+    if (e.id === 'humano' && !w.doteHumano) return 'Elige la dote de origen (Versátil)';
+    if (e.id === 'humano' && w.doteHumano === 'habilidoso' && w.habDote.length !== 3) return 'Elige 3 habilidades para Habilidoso';
+  }
+  if (p === 3 && !wzBase()) return 'Escribe las 6 tiradas (cada una entre 3 y 18)';
+  if (p === 4 && !w.alineamiento) return 'Elige un alineamiento';
+  if (p === 5) { if (!w.nombre.trim()) return 'Escribe el nombre del personaje'; if (w.idiomas.length !== 2) return 'Elige 2 idiomas además del común'; }
+  return '';
+}
+const wzOp = (accion, k, v, on, titulo, sub) => `<button class="wz-op${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}"><b>${esc(titulo)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
+const wzChip = (accion, k, v, on, txt, deshab) => `<button class="chip${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}" ${deshab ? 'disabled' : ''}>${esc(txt)}</button>`;
+const wzRasgos = (lista, k) => lista.map((r, i) => `<details class="regla" data-k="${k}-${i}"><summary>${esc(r.nombre)}</summary><div class="cuerpo">${r.html}</div></details>`).join('');
+
+function wzPasoClase() {
+  const w = WZ(), c = wzClase();
+  let html = `<p class="nota">La clase es lo que tu personaje sabe hacer: combatir, lanzar conjuros, sanar… Toca una para ver sus detalles.</p>
+    <div class="wz-ops">${CR.clases.map(x => wzOp('wzSet', 'clase', x.id, x.id === w.clase, x.nombre, `Característica principal: ${esc(x.caracteristica)} · Dado de golpe ${esc(x.dado)}`)).join('')}</div>`;
+  if (c) {
+    const n = nHabClase(c), ops = opcionesHabClase(c);
+    html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(c.nombre)}</h2>
+      <div class="wz-det"><p><b>Salvaciones:</b> ${esc(c.salvaciones)}</p><p><b>Armaduras:</b> ${esc(c.armaduras)}</p><p><b>Armas:</b> ${esc(c.armas)}</p>${c.herramientas && !/^ninguna/i.test(c.herramientas) ? `<p><b>Herramientas:</b> ${esc(c.herramientas)}</p>` : ''}</div>
+      <h3 class="sub-tit">Elige ${n} habilidades <span class="cuenta">${w.habClase.length}/${n}</span></h3>
+      <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>
+      <h3 class="sub-tit">Equipo inicial</h3>
+      <div class="wz-ops">${Object.entries(c.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoClase', k, w.equipoClase === k, 'Opción ' + k, esc(v))).join('')}</div>
+      <h3 class="sub-tit">Rasgos de nivel 1</h3>${wzRasgos(c.rasgos.filter(r => r.nivel === 1), 'rc')}</section>`;
+  }
+  return html;
+}
+function wzPasoTrasfondo() {
+  const w = WZ(), t = wzTras();
+  let html = `<p class="nota">El trasfondo es lo que hacía tu personaje antes de ser aventurero. Le da una dote, dos habilidades, una herramienta y aumentos de características.</p>
+    <div class="wz-ops">${CR.trasfondos.map(x => wzOp('wzSet', 'trasfondo', x.id, x.id === w.trasfondo, x.nombre, `${x.caracteristicas.map(k => CAR_ABR[k]).join(', ')} · ${esc(x.dote)} · ${x.habilidades.map(esc).join(', ')}`)).join('')}</div>`;
+  if (t) {
+    const d = doteSRD(t.doteId);
+    const repetidas = t.habilidades.filter(h => w.habClase.some(x => norm(x) === norm(h)));
+    html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(t.nombre)}</h2>
+      <div class="wz-det"><p><b>Características:</b> ${t.caracteristicas.map(k => CAR_NOMBRE[k]).join(', ')} (las subirás en el paso de características)</p>
+      <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p><p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
+      ${repetidas.length ? `<div class="aviso malo"><span><b>${repetidas.map(esc).join(' y ')}</b> ya la${repetidas.length > 1 ? 's' : ''} elegiste en la clase. Vuelve al paso 1 y elige otra${repetidas.length > 1 ? 's' : ''} en su lugar.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}
+      <h3 class="sub-tit">Dote: ${esc(t.dote)}</h3>${d ? `<div class="wz-det">${d.html}</div>` : ''}
+      ${t.doteId === 'iniciado-en-la-magia' ? `<p class="nota">Elige 2 trucos y 1 conjuro de nivel 1 de la lista de ${esc(t.doteNota)}; podrás añadirlos en «Conjuros» del perfil.</p>` : ''}
+      <h3 class="sub-tit">Equipo</h3>
+      <div class="wz-ops">${Object.entries(t.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoTras', k, w.equipoTras === k, 'Opción ' + k, esc(v))).join('')}</div></section>`;
+  }
+  return html;
+}
+function wzPasoEspecie() {
+  const w = WZ(), e = wzEsp();
+  let html = `<p class="nota">La especie da el tamaño, la velocidad y unos atributos especiales.</p>
+    <div class="wz-ops">${CR.especies.map(x => wzOp('wzSet', 'especie', x.id, x.id === w.especie, x.nombre, `${x.tamanos.join(' o ')} · ${String(x.velocidad).replace('.', ',')} m${x.vision ? ` · visión en la oscuridad ${x.vision} m` : ''}`)).join('')}</div>`;
+  if (e) {
+    const comp = wzCompetencias();
+    const ocupada = h => comp.has(norm(h)) && comp.get(norm(h)).origen !== 'especie' && comp.get(norm(h)).origen !== 'dote';
+    html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(e.nombre)}</h2>`;
+    if (e.linaje) {
+      const l = e.linaje;
+      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><div class="wz-ops">${l.opciones.map(o => wzOp('wzSet', 'linaje', o.id, o.id === w.linaje, o.nombre,
+        o.dano ? 'Daño de ' + esc(o.dano) : o.nivel1 ? `${o.nivel1}${o.nivel3 ? `<br>Nivel 3: <em>${esc(o.nivel3)}</em> · Nivel 5: <em>${esc(o.nivel5)}</em>` : ''}` : '')).join('')}</div>`;
+      if (l.aptitud) html += `<h3 class="sub-tit">Aptitud mágica del linaje</h3><div class="seg">${['int', 'sab', 'car'].map(k => `<button class="opc ${w.aptitud === k ? 'on' : ''}" data-a="wzSet" data-k="aptitud" data-v="${k}">${CAR_NOMBRE[k]}</button>`).join('')}</div>`;
+    }
+    if (e.tamanos.length > 1) html += `<h3 class="sub-tit">Tamaño</h3><div class="seg">${e.tamanos.map(t => `<button class="opc ${w.tamano === t ? 'on' : ''}" data-a="wzSet" data-k="tamano" data-v="${t}">${t}</button>`).join('')}</div><p class="nota" style="margin-top:0">${esc(e.tamanoTexto)}</p>`;
+    if (e.id === 'elfo') html += `<h3 class="sub-tit">Sentidos agudos: elige una habilidad</h3><div class="chips">${['Percepción', 'Perspicacia', 'Supervivencia'].map(h => wzChip('wzSet', 'habEspecie', h, w.habEspecie === h, h, ocupada(h))).join('')}</div>`;
+    if (e.id === 'humano') {
+      html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre))).join('')}</div>
+        <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => wzOp('wzSet', 'doteHumano', d.id, w.doteHumano === d.id, d.nombre + (d.id === 'habilidoso' ? ' (recomendada)' : ''), '')).join('')}</div>`;
+      if (w.doteHumano === 'habilidoso') html += `<h3 class="sub-tit">Habilidoso: elige 3 habilidades <span class="cuenta">${w.habDote.length}/3</span></h3><p class="nota" style="margin-top:0">La dote también permite cambiar alguna por una herramienta; si lo prefieres, anótalo en sus notas.</p>
+        <div class="chips">${CR.habilidades.map(h => wzChip('wzHab', 'habDote', h.nombre, w.habDote.includes(h.nombre), h.nombre, ocupada(h.nombre) || norm(h.nombre) === norm(w.habEspecie))).join('')}</div>`;
+      else if (w.doteHumano) { const d = doteSRD(w.doteHumano); html += `<div class="wz-det">${d.html}</div>`; }
+    }
+    html += `<h3 class="sub-tit">Atributos especiales</h3>${wzRasgos(e.rasgos, 're')}</section>`;
+  }
+  return html;
+}
+function htmlWzCalculo() {
+  const w = WZ(), c = wzClase(), t = wzTras(), o = wzOrden();
+  const s = tiradasValidas().sort((a, b) => b - a);
+  const base = wzBase(), bo = wzBonus(), fin = wzFinal();
+  let html = `<h3 class="sub-tit">2. Ordena las características por preferencia</h3>
+    <p class="nota" style="margin-top:0">La primera recibe la tirada más alta y la última la más baja. Para ${c ? `un ${esc(c.nombre.toLowerCase())} lo más importante es <b>${esc(c.caracteristica)}</b>; el orden de partida es el que recomienda el SRD` : 'tu clase'}. Usa las flechas para cambiarlo.</p>
+    <div class="wz-orden">${o.map((k, i) => `<div class="fila-orden"><span class="wz-pos">${i + 1}</span><b>${CAR_NOMBRE[k]}</b><span class="wz-val">${s[i] ?? '—'}</span>
+      <button class="icono peq" data-a="wzMover" data-k="${k}" data-d="-1" aria-label="Subir ${CAR_NOMBRE[k]}" ${i === 0 ? 'disabled' : ''}>▲</button>
+      <button class="icono peq" data-a="wzMover" data-k="${k}" data-d="1" aria-label="Bajar ${CAR_NOMBRE[k]}" ${i === 5 ? 'disabled' : ''}>▼</button></div>`).join('')}</div>`;
+  if (t) {
+    const cs = t.caracteristicas;
+    html += `<h3 class="sub-tit">3. Aumentos del trasfondo (${esc(t.nombre)}: ${cs.map(k => CAR_ABR[k]).join(', ')})</h3>
+      <p class="nota" style="margin-top:0">Sube una en +2 y otra en +1, o las tres en +1. Ninguna puede pasar de 20.</p>
+      <div class="seg"><button class="opc ${w.modoBonus !== '111' ? 'on' : ''}" data-a="wzSet" data-k="modoBonus" data-v="21">+2 y +1</button><button class="opc ${w.modoBonus === '111' ? 'on' : ''}" data-a="wzSet" data-k="modoBonus" data-v="111">+1 a las tres</button></div>`;
+    if (w.modoBonus !== '111') {
+      const b2 = Object.keys(bo).find(k => bo[k] === 2), b1 = Object.keys(bo).find(k => bo[k] === 1);
+      html += `<div class="wz-bonus"><span>+2 a</span><div class="seg">${cs.map(k => `<button class="opc ${b2 === k ? 'on' : ''}" data-a="wzBonus" data-n="2" data-v="${k}">${CAR_ABR[k]}</button>`).join('')}</div></div>
+        <div class="wz-bonus"><span>+1 a</span><div class="seg">${cs.map(k => `<button class="opc ${b1 === k ? 'on' : ''}" data-a="wzBonus" data-n="1" data-v="${k}" ${k === b2 ? 'disabled' : ''}>${CAR_ABR[k]}</button>`).join('')}</div></div>`;
+    }
+  }
+  html += `<h3 class="sub-tit">Resultado</h3>` + (fin
+    ? `<table class="wz-tabla"><thead><tr><th>Característica</th><th>Tirada</th><th>Trasfondo</th><th>Total</th><th>Mod.</th></tr></thead><tbody>
+      ${CARS_PJ.map(([k, n]) => `<tr><td>${n}</td><td>${base[k]}</td><td>${bo[k] ? '+' + bo[k] : ''}</td><td><b>${fin[k]}</b></td><td><b>${signo(modDe(fin[k]))}</b></td></tr>`).join('')}</tbody></table>`
+    : `<p class="nota">Cuando escribas las 6 tiradas verás aquí las puntuaciones finales.</p>`);
+  return html;
+}
+function wzPasoCaracteristicas() {
+  const w = WZ();
+  return `<div class="reglas-box"><div class="reglas-tit">Cómo se tiran (método 4d6)</div>
+      <p style="margin:4px 0">Para <b>cada una</b> de las 6 características:</p>
+      <ol class="wz-pasos-lista"><li>Tira <b>4 dados de seis caras</b> (4d6).</li><li><b>Quita el dado más bajo</b>.</li><li><b>Suma los otros tres</b>. Ese es el resultado (entre 3 y 18).</li></ol>
+      <p style="margin:4px 0">Ejemplo: sacas 6, 4, 3 y 1 → quitas el 1 → 6 + 4 + 3 = <b>13</b>.</p>
+      <p style="margin:4px 0">Repite hasta tener 6 resultados y escríbelos abajo en cualquier orden: la app los ordena de mayor a menor.</p></div>
+    <h3 class="sub-tit">1. Escribe los 6 resultados</h3>
+    <div class="wz-tiradas">${w.tiradas.map((v, i) => `<label class="car-pj"><span>Tirada ${i + 1}</span><input data-in="wzTirada" data-n="${i}" type="number" inputmode="numeric" min="3" max="18" value="${esc(v)}" enterkeyhint="next"></label>`).join('')}</div>
+    <div id="wz-calc">${htmlWzCalculo()}</div>`;
+}
+function wzPasoAlineamiento() {
+  const w = WZ();
+  return `<p class="nota">El alineamiento resume su actitud: la moral (bueno, neutral o malvado) y su relación con el orden (legal, neutral o caótico).</p>
+    <div class="wz-alin">${CR.alineamientos.map(a => `<button class="opc ${w.alineamiento === a.abr ? 'on' : ''}" data-a="wzSet" data-k="alineamiento" data-v="${a.abr}"><b>${a.abr}</b><small>${esc(a.nombre)}</small></button>`).join('')}</div>
+    <p class="nota">El juego da por hecho que los personajes de los jugadores no son malvados. Si alguien quiere uno malvado, que lo hable antes con el GM.</p>`;
+}
+function wzPasoDetalles() {
+  const w = WZ(), c = wzClase();
+  const campo = (k, etq, ph) => `<label class="campo"><span>${etq}</span><input data-in="wz" data-k="${k}" value="${esc(w[k])}" placeholder="${ph}"></label>`;
+  const area = (k, etq, ph) => `<label class="campo"><span>${etq}</span><textarea data-in="wz" data-k="${k}" rows="4" placeholder="${ph}">${esc(w[k])}</textarea></label>`;
+  const extra = wzIdiomasClase(c);
+  return `${campo('nombre', 'Nombre del personaje', 'p. ej. Lia Tormenta')}${campo('jugador', 'Jugador (opcional)', '')}
+    ${area('descripcion', 'Descripción física', 'Edad, altura, complexión, ojos, pelo, piel, ropa, cicatrices…')}
+    ${area('personalidad', 'Personalidad e historia', 'Cómo es, qué quiere, de dónde viene, qué le importa…')}
+    <h3 class="sub-tit">Idiomas <span class="cuenta">${w.idiomas.length}/2</span></h3>
+    <p class="nota" style="margin-top:0">Sabe <b>común</b>${extra.length ? ` y, por su clase, <b>${extra.map(esc).join(', ')}</b>` : ''}. Elige 2 idiomas estándar más.</p>
+    <div class="chips">${CR.idiomas.estandar.filter(i => i !== 'Común').map(i => wzChip('wzIdioma', 'idiomas', i, w.idiomas.includes(i), i)).join('')}</div>`;
+}
+const wzIdiomasClase = c => !c ? [] : c.rasgos.filter(r => r.nivel === 1 && /^(Jerga de ladrones|Druídico)$/.test(r.nombre)).map(r => r.nombre);
+// Todo lo que se calcula del personaje (se usa en el resumen y al crearlo)
+function wzHoja() {
+  const w = WZ(), c = wzClase(), t = wzTras(), e = wzEsp(), l = wzLinaje(), f = wzFinal();
+  const md = k => modDe(f[k]), bc = 2;
+  const dotes = wzDotes(), alerta = dotes.some(d => d.id === 'alerta');
+  let ca = 10 + md('des'), caNota = 'sin armadura (10 + Des)';
+  if (c.id === 'barbaro') { ca = 10 + md('des') + md('con'); caNota = 'Defensa sin armadura (Des + Con)'; }
+  if (c.id === 'monje') { ca = 10 + md('des') + md('sab'); caNota = 'Defensa sin armadura (Des + Sab)'; }
+  // Armadura y escudo del equipo inicial de la clase (si se eligió el paquete con equipo)
+  const eqClase = norm(c.equipoOpciones[w.equipoClase] || '');
+  const arm = ARMADURAS_INICIALES.find(a => a.re.test(eqClase));
+  if (arm) { ca = arm.base + Math.min(md('des'), arm.maxDes); caNota = arm.nombre + (arm.maxDes ? ` (${arm.base} + Des${arm.maxDes < 9 ? ', máx. +' + arm.maxDes : ''})` : ` (${arm.base})`); }
+  if (/\bescudo\b/.test(eqClase)) { ca += 2; caNota += ' + escudo (+2)'; }
+  const pg = Math.max(1, dadoGolpe(c) + md('con') + (e.id === 'enano' ? 1 : 0));
+  const comp = wzCompetencias();
+  const habilidades = CR.habilidades.map(h => ({ ...h, comp: comp.has(norm(h.nombre)), origen: (comp.get(norm(h.nombre)) || {}).origen, total: md(h.car) + (comp.has(norm(h.nombre)) ? bc : 0) }));
+  const percep = habilidades.find(h => h.id === 'percepcion');
+  let vision = e.vision; if (l && l.vision) vision = l.vision;
+  let velocidad = e.velocidad; if (l && l.velocidad) velocidad = l.velocidad;
+  const tamano = e.tamanos.length > 1 ? w.tamano : e.tamanos[0];
+  const alin = CR.alineamientos.find(a => a.abr === w.alineamiento);
+  const idiomas = ['Común', ...wzIdiomasClase(c), ...w.idiomas];
+  const salv = SALVACIONES_CLASE[c.id] || [];
+  const equipo = [c.equipoOpciones[w.equipoClase], t.equipoOpciones[w.equipoTras]].filter(Boolean);
+  const especieTxt = e.nombre + (l ? ` (${l.nombre.replace(/\s*\(.*\)$/, '')})` : '');
+  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
+}
+function wzPasoResumen() {
+  const w = WZ(), h = wzHoja();
+  const fila = (k, v) => `<p><b>${k}:</b> ${v}</p>`;
+  return `<div class="wz-det wz-resumen">
+      <h2 style="margin:0 0 2px;font-size:1.15rem">${esc(w.nombre)}</h2>
+      <p class="nota" style="margin:0 0 8px">${esc(h.c.nombre)} de nivel 1 · ${esc(h.especieTxt)} · ${esc(h.t.nombre)} · ${esc(h.alin.nombre)}</p>
+      <div class="wz-stats"><div><span>CA</span><b>${h.ca}</b></div><div><span>PG</span><b>${h.pg}</b></div><div><span>Iniciativa</span><b>${signo(modDe(h.f.des) + (h.alerta ? h.bc : 0))}</b></div><div><span>Velocidad</span><b>${String(h.velocidad).replace('.', ',')} m</b></div><div><span>BC</span><b>${signo(h.bc)}</b></div><div><span>Perc. pasiva</span><b>${h.pasiva}</b></div></div>
+      <p class="nota" style="margin:4px 0 0">CA: ${h.caNota}. PG = ${dadoGolpe(h.c)} (dado de golpe) ${signo(modDe(h.f.con))} (Con)${h.e.id === 'enano' ? ' +1 (Aguante enano)' : ''}.</p>
+    </div>
+    <h3 class="sub-tit">Características y salvaciones</h3>
+    <div class="cars-pj">${CARS_PJ.map(([k, n]) => `<div class="car-pj${h.salv.includes(k) ? ' comp' : ''}"><span>${n}</span><b class="wz-pt">${h.f[k]}</b><b>${signo(modDe(h.f[k]))}</b><small>Salv. ${signo(modDe(h.f[k]) + (h.salv.includes(k) ? h.bc : 0))}${h.salv.includes(k) ? ' ●' : ''}</small></div>`).join('')}</div>
+    <p class="nota">● Competencia en la salvación (por su clase).</p>
+    <h3 class="sub-tit">Habilidades</h3>
+    <div class="wz-habs">${h.habilidades.map(x => `<div class="${x.comp ? 'comp' : ''}"><span>${x.comp ? '● ' : ''}${esc(x.nombre)} <small>(${CAR_ABR[x.car]})</small></span><b>${signo(x.total)}</b></div>`).join('')}</div>
+    <div class="wz-det" style="margin-top:12px">
+      ${fila('Tamaño', esc(h.tamano))}${h.vision ? fila('Visión en la oscuridad', h.vision + ' m') : ''}
+      ${fila('Dotes', h.dotes.map(d => esc(d.nombre)).join(', '))}
+      ${fila('Atributos de especie', h.e.rasgos.map(r => esc(r.nombre)).join(', ') + (h.l ? ` (${esc(h.l.nombre)}${w.aptitud ? ', aptitud mágica: ' + CAR_NOMBRE[w.aptitud] : ''})` : ''))}
+      ${fila('Rasgos de clase', h.c.rasgos.filter(r => r.nivel === 1).map(r => esc(r.nombre)).join(', '))}
+      ${fila('Armaduras', esc(h.c.armaduras))}${fila('Armas', esc(h.c.armas))}
+      ${fila('Herramienta', esc(h.t.herramienta))}
+      ${fila('Idiomas', h.idiomas.map(esc).join(', '))}
+      ${fila('Equipo', h.equipo.map(esc).join(' + '))}
+      ${w.descripcion.trim() ? fila('Descripción', esc(w.descripcion)) : ''}${w.personalidad.trim() ? fila('Personalidad e historia', esc(w.personalidad)) : ''}
+    </div>
+    <p class="nota">Al crearlo se rellenan también sus espacios de conjuro y recursos de clase. Todo se puede cambiar después en su perfil.</p>`;
+}
+VISTAS.crear = () => {
+  if (!CR) return { titulo: 'Crear personaje', atras: '#/personajes', html: '<p class="vacio">Faltan los datos de creación.</p>' };
+  if (!E.borradorPJ) return { titulo: 'Crear personaje', atras: '#/personajes', html: `<p class="vacio">No hay ningún personaje a medio crear.</p><button class="btn primario ancho" data-a="crearPJ">Empezar uno</button>` };
+  const w = WZ(), p = w.paso;
+  const cuerpo = [wzPasoClase, wzPasoTrasfondo, wzPasoEspecie, wzPasoCaracteristicas, wzPasoAlineamiento, wzPasoDetalles, wzPasoResumen][p]();
+  const html = `<p class="wz-paso">Paso ${p + 1} de ${WZ_PASOS.length} · ${WZ_PASOS[p]}</p>
+    <div class="wz-prog">${WZ_PASOS.map((n, i) => `<button class="${i < p ? 'hecho' : i === p ? 'actual' : ''}" data-a="wzIr" data-n="${i}" aria-label="Paso ${i + 1}: ${n}" ${i > p ? 'disabled' : ''}></button>`).join('')}</div>
+    ${cuerpo}`;
+  const ultimo = p === WZ_PASOS.length - 1;
+  return {
+    titulo: 'Crear personaje', atras: '#/personajes', html, sinNav: true,
+    pie: `${p > 0 ? `<button class="btn secundario" data-a="wzAtras">Atrás</button>` : ''}<button class="btn ${ultimo ? 'ok' : 'primario'}" data-a="${ultimo ? 'wzCrear' : 'wzSig'}">${ultimo ? 'Crear personaje' : 'Siguiente: ' + WZ_PASOS[p + 1]}</button>`
+  };
+};
+function wzPintar(arriba) { guardar(); render(); if (arriba) window.scrollTo(0, 0); }
+A.crearPJ = async () => {
+  if (E.borradorPJ && (E.borradorPJ.clase || E.borradorPJ.paso)) {
+    const r = await preguntar('Tienes un personaje a medio crear. ¿Quieres seguir con él?', [{ t: 'Seguir con él', v: 'seguir', clase: 'primario' }, { t: 'Empezar uno nuevo', v: 'nuevo' }, { t: 'Cancelar' }]);
+    if (!r) return;
+    if (r === 'nuevo') E.borradorPJ = wzNuevo();
+  } else E.borradorPJ = wzNuevo();
+  guardar(); navegar('#/crear');
+};
+A.wzSet = el => {
+  const w = WZ(), k = el.dataset.k, v = el.dataset.v;
+  if (w[k] === v && (k === 'habEspecie' || k === 'doteHumano')) w[k] = null; else w[k] = v;
+  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; }
+  if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; }
+  if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; }
+  if (k === 'doteHumano') w.habDote = [];
+  wzPintar(false);
+  if (['clase', 'trasfondo', 'especie'].includes(k)) { const d = $('#wz-detalle'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+};
+A.wzHab = el => {
+  const w = WZ(), lista = w[el.dataset.k], v = el.dataset.v;
+  const max = el.dataset.k === 'habClase' ? nHabClase(wzClase()) : 3;
+  const i = lista.indexOf(v);
+  if (i >= 0) lista.splice(i, 1);
+  else if (lista.length >= max) { toast(`Ya has elegido ${max}. Quita una primero.`); return; }
+  else lista.push(v);
+  wzPintar(false);
+};
+A.wzIdioma = el => {
+  const w = WZ(), v = el.dataset.v, i = w.idiomas.indexOf(v);
+  if (i >= 0) w.idiomas.splice(i, 1);
+  else if (w.idiomas.length >= 2) { toast('Ya has elegido 2. Quita uno primero.'); return; }
+  else w.idiomas.push(v);
+  wzPintar(false);
+};
+A.wzMover = el => {
+  const w = WZ(), o = wzOrden().slice(), i = o.indexOf(el.dataset.k), j = i + (+el.dataset.d);
+  if (j < 0 || j > 5) return;
+  [o[i], o[j]] = [o[j], o[i]]; w.orden = o;
+  wzPintar(false);
+};
+A.wzBonus = el => {
+  const w = WZ(), bo = wzBonus(), k = el.dataset.v;
+  const b2 = Object.keys(bo).find(x => bo[x] === 2), b1 = Object.keys(bo).find(x => bo[x] === 1);
+  if (el.dataset.n === '2') { w.bonus2 = k; w.bonus1 = k === b1 ? b2 : b1; }
+  else { w.bonus2 = b2; w.bonus1 = k; }
+  wzPintar(false);
+};
+A.wzSig = () => {
+  const w = WZ(), falta = wzFalta(w.paso);
+  if (falta) { toast(falta); return; }
+  w.paso = Math.min(WZ_PASOS.length - 1, w.paso + 1); wzPintar(true);
+};
+A.wzAtras = () => { const w = WZ(); w.paso = Math.max(0, w.paso - 1); wzPintar(true); };
+A.wzIr = el => { const w = WZ(), n = +el.dataset.n; if (n <= w.paso) { w.paso = n; wzPintar(true); } };
+A.wzCrear = () => {
+  for (let p = 0; p < WZ_PASOS.length - 1; p++) { const f = wzFalta(p); if (f) { WZ().paso = p; wzPintar(true); toast(f); return; } }
+  const w = WZ(), h = wzHoja();
+  const comp = h.habilidades.filter(x => x.comp).map(x => x.nombre);
+  const notas = [
+    `${h.c.nombre} 1 · ${h.especieTxt} · ${h.t.nombre} · ${h.alin.nombre}`,
+    `Tamaño ${h.tamano} · Velocidad ${String(h.velocidad).replace('.', ',')} m${h.vision ? ` · Visión en la oscuridad ${h.vision} m` : ''}`,
+    `Habilidades: ${comp.join(', ')}`,
+    `Dotes: ${h.dotes.map(d => d.nombre).join(', ')}`,
+    `Herramienta: ${h.t.herramienta}`,
+    `Idiomas: ${h.idiomas.join(', ')}`,
+    `Equipo: ${h.equipo.join(' + ')}`,
+    w.descripcion.trim() && `Descripción: ${w.descripcion.trim()}`,
+    w.personalidad.trim() && `Personalidad e historia: ${w.personalidad.trim()}`
+  ].filter(Boolean).join('\n');
+  const pj = {
+    id: uid(), nombre: w.nombre.trim(), jugador: w.jugador.trim(), clase: `${h.c.nombre} ${h.e.nombre.toLowerCase()}`, nivel: 1,
+    ca: h.ca, pgMax: h.pg, ...h.f, salvComp: h.salv.slice(), iniDes: true, alerta: h.alerta, iniBC: h.alerta, iniExtra: 0,
+    pasiva: h.pasiva, notas,
+    hoja: { clase: h.c.id, trasfondo: h.t.id, especie: h.e.id, linaje: w.linaje, aptitud: w.aptitud, tamano: h.tamano, alineamiento: w.alineamiento,
+      habilidades: comp, dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramienta: h.t.herramienta,
+      tiradas: w.tiradas.map(Number), orden: wzOrden(), bonus: wzBonus(), descripcion: w.descripcion.trim(), personalidad: w.personalidad.trim(), creado: Date.now() }
+  };
+  E.personajes.push(pj);
+  E.borradorPJ = null;
+  A.rellenarEspacios({ dataset: { pj: pj.id } });
+  navegar('#/personaje/' + pj.id);
+  setTimeout(() => toast(`${pj.nombre} creado`), 50);
+};
 // --- Personajes
 A.nuevoPJ = () => {
   const pj = { id: uid(), nombre: `Personaje ${E.personajes.length + 1}`, jugador: '', clase: '', nivel: 1, ca: 10, pgMax: 10, des: 10, iniDes: true, iniBC: false, iniExtra: 0, notas: '' };
@@ -2203,6 +2568,12 @@ A.borrarTodo = async () => {
 
 // ============ Campos (escritura) ============
 const I = {};
+// Creador de personajes: textos y tiradas (sin repintar, para no perder el foco)
+I.wz = el => { WZ()[el.dataset.k] = el.value; guardar(); };
+I.wzTirada = el => {
+  WZ().tiradas[+el.dataset.n] = el.value.trim(); guardar();
+  const c = $('#wz-calc'); if (c) c.innerHTML = htmlWzCalculo();
+};
 I.encNombre = el => { const enc = encActual(); if (!enc) return; enc.nombre = el.value; enc.mod = Date.now(); guardar(); $('#cabecera h1').textContent = el.value; document.title = el.value + ' · Encuentros D&D'; };
 I.encNotas = el => { const enc = encActual(); if (!enc) return; enc.notas = el.value; guardar(); };
 I.tirada = el => {

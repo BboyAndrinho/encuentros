@@ -1,8 +1,8 @@
 // Guarda la app en el teléfono para que funcione sin conexión.
 // Cuando publiques una versión nueva, cambia el número de VERSION.
-const VERSION = 'encuentros-v15';
+const VERSION = 'encuentros-v16';
 const ARCHIVOS = [
-  './', 'index.html', 'estilos.css', 'app.js', 'datos/srd.js', 'manifest.webmanifest',
+  './', 'index.html', 'estilos.css', 'app.js', 'datos/srd.js', 'datos/creacion.js','manifest.webmanifest',
   'iconos/icono.svg', 'iconos/icono-192.png', 'iconos/icono-512.png'
 ];
 
