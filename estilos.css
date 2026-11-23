@@ -150,7 +150,10 @@ body.con-nav #pie { bottom: calc(60px + env(safe-area-inset-bottom)); padding-bo
 .fila3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .fila2 .campo, .fila3 .campo { margin: 6px 0; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 0; }
-.check input { width: 22px; height: 22px; accent-color: var(--acento); }
+.check input { width: 22px; height: 22px; flex: none; margin: 0; accent-color: var(--acento); }
+.check > span { flex: 1; min-width: 0; }
+.check:has(small) { align-items: flex-start; padding: 6px 0; }
+.check small { display: block; color: var(--suave); font-size: .82rem; line-height: 1.3; margin-top: 1px; }
 .oculto { display: none !important; }
 .nota { color: var(--suave); font-size: .88rem; }
 .vacio { color: var(--suave); text-align: center; padding: 18px 8px; margin: 0; }

@@ -810,7 +810,7 @@ VISTAS.personaje = id => {
     <p class="nota" id="pj-calc">Mod. de Destreza ${signo(modDe(pj.des))} · Bonificador por competencia ${signo(bcDeNivel(pj.nivel))}</p>
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 4px">Cómo se calcula su iniciativa</h2>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniDes" ${pj.iniDes !== false ? 'checked' : ''}> Sumar el modificador de Destreza</label>
-      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="alerta" ${pj.alerta ? 'checked' : ''}> Tiene la dote <b>Alerta</b> (suma su BC y puede intercambiar la iniciativa con un aliado)</label>
+      <label class="check"><input type="checkbox" data-ch="pjchk" data-k="alerta" ${pj.alerta ? 'checked' : ''}><span>Tiene la dote <b>Alerta</b><small>Suma su BC a la iniciativa y puede intercambiarla con un aliado</small></span></label>
       ${campo('iniExtra', 'Otros bonificadores a la iniciativa', 'number', 'placeholder="0"')}
       <p class="nota" id="pj-ini">${esc(resumenIniPJ(pj))}</p>
     </section>
@@ -1335,7 +1335,7 @@ function hojaEditar(pid) {
     <label class="check"><input type="checkbox" id="e-usardes" ${p.ini.usarDes ? 'checked' : ''}> Sumar Destreza</label>
     <label class="check"><input type="checkbox" id="e-usarbc" ${p.ini.usarBC ? 'checked' : ''}> Sumar bonificador por competencia</label>
     ${f('e-manual', 'Iniciativa total a mano (déjalo vacío para calcularla)', p.ini.manual)}
-    ${p.tipo !== 'pj' ? `<label class="check"><input type="checkbox" id="e-aliado" ${p.aliado ? 'checked' : ''}> Es un aliado de los jugadores (no cuenta para la dificultad)</label>` : ''}
+    ${p.tipo !== 'pj' ? `<label class="check"><input type="checkbox" id="e-aliado" ${p.aliado ? 'checked' : ''}><span>Es un aliado de los jugadores<small>No cuenta para la dificultad del encuentro</small></span></label>` : ''}
     <button class="btn primario ancho" data-a="editarOk">Guardar cambios</button>
     ${p.tipo !== 'pj' ? `<button class="btn ancho" data-a="copiarPart" data-pid="${p.id}">Copiar a otro encuentro (con sus PG y usos)</button>` : ''}`, { fija: true });
   h.encId = enc.id; h.pid = pid; h.nombreOriginal = p.nombre;
