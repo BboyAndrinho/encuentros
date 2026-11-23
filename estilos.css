@@ -373,6 +373,7 @@ details.accion > summary { padding: 8px 10px; cursor: pointer; list-style: none;
 .ach.ts { color: var(--aviso); }
 .ach.dano { color: var(--enemigo); }
 .ach.conj { color: var(--aliado); font-style: italic; }
+.ach.nota { color: var(--suave); font-weight: 600; }
 .acc-txt { padding: 0 10px 8px; font-size: .9rem; }
 .acc-txt p { margin: 4px 0; }
 .enl-conj {

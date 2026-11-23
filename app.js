@@ -72,11 +72,12 @@ const RE_DANO = /(\d+)(?: \(([^)]+)\))? de daño (?:de )?(ácido|contundente|cor
 function analizarEntrada(e) {
   if (e._an) return e._an;
   const t = e.html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
-  const at = t.match(/Tirada de ataque (cuerpo a cuerpo o a distancia|cuerpo a cuerpo|a distancia):\s*([+−-]\s*\d+)(?:,\s*alcance ([^.]+?))?\./);
+  // Admite «+5 a acertar» y notas como «+4 (con ventaja si el osgo tiene agarrado al objetivo)»
+  const at = t.match(/Tirada de ataque (cuerpo a cuerpo o a distancia|cuerpo a cuerpo|a distancia):\s*([+−-]\s*\d+)(?:\s*a acertar)?(?:\s*\(([^)]*)\))?(?:,\s*alcance ([^.]+?))?\./);
   const ts = t.match(/Tirada de salvación de (\S+):\s*CD (\d+)/);
   const danos = [...t.matchAll(RE_DANO)].map(x => ({ media: +x[1], dados: x[2] || '', tipo: x[3].toLowerCase() }));
   e._an = {
-    ataque: at && { tipo: at[1], bono: at[2].replace(/\s/g, '').replace('-', '−'), alcance: at[3] || '' },
+    ataque: at && { tipo: at[1], bono: at[2].replace(/\s/g, '').replace('-', '−'), nota: at[3] || '', alcance: at[4] || '' },
     ts: ts && { car: CAR_CORTO[ts[1]] || ts[1], cd: +ts[2] },
     danos
   };
@@ -292,6 +293,9 @@ function tick(enc, pid, momento, av) {
   for (const p of enc.participantes) {
     p.estados = p.estados.filter(s => {
       if ((s.cuentaEn || p.id) !== pid || (s.momento || 'fin') !== momento || s.rondas == null) return true;
+      // Aplicado durante el mismo turno que lo cuenta: ese final de turno aún no cuenta
+      // («hasta el final de tu siguiente turno» dura hasta el siguiente, no hasta este)
+      if (s.saltar) { s.saltar = false; return true; }
       s.rondas--;
       if (s.rondas <= 0) {
         av.push({ t: `${p.nombre}: termina «${s.nombre}»`, tipo: 'bueno' });
@@ -373,12 +377,21 @@ function aplicarDanio(enc, p, n, av) {
     } else {
       p.derrotado = true;
       av.push({ t: `${p.nombre} ha sido derrotado`, tipo: 'bueno' });
+      comprobarVictoria(enc, av);
     }
   } else if (antes === 0 && p.tipo === 'pj') {
     p.estable = false;
     p.muerte.ko = Math.min(3, p.muerte.ko + 1);
     av.push({ t: `${p.nombre} recibe daño a 0 PG: 1 fallo de TS contra muerte (añade otro si fue crítico)`, tipo: 'malo' });
     if (p.muerte.ko >= 3) av.push({ t: `${p.nombre} ha muerto`, tipo: 'malo' });
+  }
+}
+// Cuando cae el último enemigo, avisar y ofrecer terminar el combate
+function comprobarVictoria(enc, av) {
+  const enemigos = enc.participantes.filter(p => p.tipo !== 'pj' && !p.aliado);
+  if (enemigos.length && enemigos.every(p => p.derrotado)) {
+    av.push({ t: '¡Todos los enemigos han caído!', tipo: 'bueno', accion: { q: 'terminar', txt: 'Terminar combate' } });
+    registrar(enc, 'Todos los enemigos han caído');
   }
 }
 function aplicarCuracion(enc, p, n, av) {
@@ -945,6 +958,7 @@ function filaAccion(e, k) {
   if (a.ataque) {
     const tipo = a.ataque.tipo === 'cuerpo a cuerpo' ? 'Cuerpo a cuerpo' : a.ataque.tipo === 'a distancia' ? 'A distancia' : 'CaC o distancia';
     chips.push(`<span class="ach at">${esc(a.ataque.bono)} · ${tipo}${a.ataque.alcance ? ' · ' + esc(a.ataque.alcance) : ''}</span>`);
+    if (a.ataque.nota) chips.push(`<span class="ach nota">${esc(a.ataque.nota.charAt(0).toUpperCase() + a.ataque.nota.slice(1))}</span>`);
   }
   if (a.ts) chips.push(`<span class="ach ts">TS ${esc(a.ts.car)} CD ${a.ts.cd}</span>`);
   for (const d of a.danos) chips.push(`<span class="ach dano">${d.media}${d.dados ? ` (${esc(d.dados)})` : ''} ${esc(d.tipo)}</span>`);
@@ -1457,6 +1471,7 @@ A.feOk = () => {
         if (esInmune(p, s.nombre)) inmunes.push(p.nombre);
         p.estados = p.estados.filter(x => x.id !== s.id);
       }
+      if (s.rondas != null && s.momento === 'fin' && enc.combate && (s.cuentaEn || p.id) === enc.combate.turnoId) s.saltar = true;
       p.estados.push(s);
       registrar(enc, `${p.nombre}: ${s.nombre}${s.rondas ? ` (${s.rondas} turnos)` : ''}`);
     }
@@ -1530,8 +1545,8 @@ A.togDerrotado = el => {
   accionCombate(enc, () => {
     p.derrotado = !p.derrotado;
     if (!p.derrotado && p.pg === 0) p.pg = 1;
-    if (p.derrotado && enc.combate.turnoId === p.id) { /* se salta en el siguiente turno */ }
     registrar(enc, `${p.nombre} ${p.derrotado ? 'queda fuera de combate' : 'vuelve al combate'}`);
+    if (p.derrotado) { const av = []; comprobarVictoria(enc, av); enc.combate.avisos = [...av, ...(enc.combate.avisos || [])]; }
   });
 };
 A.msMarcar = el => {
@@ -1547,6 +1562,7 @@ A.msMarcar = el => {
 A.avisoAccion = el => {
   const enc = encActual(); const c = enc && enc.combate; if (!c) return;
   const i = +el.dataset.n; const a = c.avisos[i]; if (!a || !a.accion) return;
+  if (a.accion.q === 'terminar') return A.terminarCombate();
   accionCombate(enc, () => {
     const p = partPorId(enc, a.accion.pid);
     if (p && a.accion.q === 'quitarEstado') {
@@ -1607,7 +1623,7 @@ A.historial = () => {
 };
 A.terminarCombate = async () => {
   const enc = encActual(); if (!enc) return;
-  hojaActual().cerrar();
+  const hm = hojaActual(); if (hm) hm.cerrar();
   const ok = await preguntar('¿Terminar el combate? Se conservan los PG y estados actuales; puedes restablecerlos después.', [{ t: 'Terminar combate', v: true, clase: 'peligro' }, { t: 'Cancelar' }]);
   if (!ok) return;
   enc.combate = null; modoReordenar = false; delete pilasDeshacer[enc.id]; guardar();
@@ -1664,7 +1680,7 @@ I.pj = el => {
   pj[k] = el.type === 'number' ? num(el.value) : el.value;
   if (k === 'nivel' && pj.nivel != null) pj.nivel = Math.max(1, Math.min(20, pj.nivel));
   guardar();
-  if (k === 'nombre') $('#cabecera h1').textContent = pj.nombre || 'Personaje';
+  if (k === 'nombre') { $('#cabecera h1').textContent = pj.nombre || 'Personaje'; document.title = (pj.nombre || 'Personaje') + ' · Encuentros D&D'; }
   const c = $('#pj-calc'); if (c) c.textContent = `Mod. de Destreza ${signo(modDe(pj.des))} · Bonificador por competencia ${signo(bcDeNivel(pj.nivel))}`;
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
 };
