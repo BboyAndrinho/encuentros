@@ -126,7 +126,20 @@ const RECURSOS_CLASE = {
     { clave: 'canalizar-divinidad', nombre: 'Canalizar divinidad', desde: 3, max: n => n >= 11 ? 3 : 2, descanso: 'uno' }
   ]
 };
-const RAICES_CLASE = { barbar: 'barbaro', bard: 'bardo', cleri: 'clerigo', druid: 'druida', explorador: 'explorador', guerrer: 'guerrero', hechicer: 'hechicero', mag: 'mago', monj: 'monje', paladin: 'paladin' };
+const RAICES_CLASE = { barbar: 'barbaro', bard: 'bardo', bruj: 'brujo', cleri: 'clerigo', druid: 'druida', explorador: 'explorador', guerrer: 'guerrero', hechicer: 'hechicero', mag: 'mago', monj: 'monje', paladin: 'paladin', picar: 'picaro' };
+// Competencia en tiradas de salvación de cada clase («Atributos básicos de…», SRD 5.2.1)
+const SALVACIONES_CLASE = {
+  barbaro: ['fue', 'con'], bardo: ['des', 'car'], brujo: ['sab', 'car'], clerigo: ['sab', 'car'], druida: ['int', 'sab'], explorador: ['fue', 'des'],
+  guerrero: ['fue', 'con'], hechicero: ['con', 'car'], mago: ['int', 'sab'], monje: ['fue', 'des'], paladin: ['sab', 'car'], picaro: ['des', 'int']
+};
+// Más adelante: monje 14 «Superviviente disciplinado» (todas) y pícaro 15 «Mente escurridiza» (+Sab y Car)
+function salvacionesDeClase(clase, nivel) {
+  const k = claseDe(clase); if (!k) return null;
+  if (k === 'monje' && nivel >= 14) return CARS_PJ.map(([c]) => c);
+  if (k === 'picaro' && nivel >= 15) return ['des', 'int', 'sab', 'car'];
+  return SALVACIONES_CLASE[k].slice();
+}
+const salvacionPJ = (pj, k) => modDe(pj[k] != null ? pj[k] : 10) + ((pj.salvComp || []).includes(k) ? bcDeNivel(pj.nivel) : 0);
 function claseDe(clase) {
   const w = norm(clase).split(/[\s,/]+/);
   for (const [raiz, k] of Object.entries(RAICES_CLASE)) if (w.some(x => x.startsWith(raiz))) return k;
@@ -857,6 +870,9 @@ VISTAS.personaje = id => {
         <input data-in="pj" data-ch="pjSync" data-k="${k}" type="number" inputmode="numeric" min="1" max="30" placeholder="10" value="${esc(pj[k] ?? '')}">
         <b data-mod="${k}">${pj[k] != null ? signo(modDe(pj[k])) : '—'}</b></label>`).join('')}</div>
       <p class="nota" id="pj-calc">Bonificador por competencia ${signo(bcDeNivel(pj.nivel))} (por su nivel)</p>
+      <h3 class="sub-tit">Tiradas de salvación</h3>
+      <p class="nota" style="margin-top:0">Marca en las que tiene competencia (las da su clase). Se suma su bonificador por competencia.</p>
+      <div class="salv-pj" id="pj-salv">${htmlSalvPJ(pj)}</div>
     </section>
     <section class="bloque"><h2 style="font-size:1rem;margin:0 0 4px">Cómo se calcula su iniciativa</h2>
       <label class="check"><input type="checkbox" data-ch="pjchk" data-k="iniDes" ${pj.iniDes !== false ? 'checked' : ''}> Sumar el modificador de Destreza</label>
@@ -1209,11 +1225,20 @@ function htmlConjurosPJ(pj, pid) {
   return `<details class="sec-mon" data-k="conj-pj" open><summary>Conjuros <span class="cuenta">${lista.length}</span></summary>
     <div class="chips conj-chips">${lista.map(c => `<button class="chip conj" data-a="verConjuro" data-id="${c.id}" data-pj="${pj.id}" data-pid="${pid || ''}"><small>${c.nivel === 0 ? 'T' : c.nivel}</small>${esc(c.nombre)}${c.concentracion ? ' <em>C</em>' : ''}</button>`).join('')}</div></details>`;
 }
-// Modificadores del jugador en la ficha del combate (solo si se han rellenado sus características)
+// Botones de las salvaciones del perfil: tocar para marcar o quitar la competencia
+function htmlSalvPJ(pj) {
+  const comp = pj.salvComp || [];
+  return CARS_PJ.map(([k], i) => `<button class="salv-btn${comp.includes(k) ? ' on' : ''}" data-a="togSalv" data-pj="${pj.id}" data-k="${k}" aria-pressed="${comp.includes(k)}">
+    <span>${CARS[i]}</span><b>${signo(salvacionPJ(pj, k))}</b></button>`).join('');
+}
+// Modificadores y salvaciones del jugador en la ficha del combate (solo si se han rellenado)
 function htmlCarsCombate(pj) {
-  if (!pj || !CARS_PJ.some(([k]) => pj[k] != null)) return '';
+  if (!pj || (!CARS_PJ.some(([k]) => pj[k] != null) && !(pj.salvComp || []).length)) return '';
+  const comp = pj.salvComp || [];
   return `<div class="salvs" style="margin-top:10px" aria-label="Modificadores por característica"><span class="salv-tit">Características</span>
-    ${CARS_PJ.map(([k], i) => `<span class="salv-chip"><b>${CARS[i]}</b>${pj[k] != null ? signo(modDe(pj[k])) : '—'}</span>`).join('')}</div>`;
+    ${CARS_PJ.map(([k], i) => `<span class="salv-chip"><b>${CARS[i]}</b>${pj[k] != null ? signo(modDe(pj[k])) : '—'}</span>`).join('')}</div>
+    <div class="salvs" aria-label="Tiradas de salvación"><span class="salv-tit">Salvaciones</span>
+    ${CARS_PJ.map(([k], i) => `<span class="salv-chip${comp.includes(k) ? ' comp' : ''}"><b>${CARS[i]}</b>${signo(salvacionPJ(pj, k))}</span>`).join('')}</div>`;
 }
 // Espacios de conjuro y recursos de un jugador. Se guardan en su PERFIL, así que se ven igual en todos los encuentros
 function htmlRecursosPJ(pj, modo) {
@@ -1879,6 +1904,8 @@ A.rellenarEspacios = el => {
     r.reserva = !!d.reserva; r.usados = Math.min(r.usados || 0, r.max);
   }
   const partes = [];
+  const salv = salvacionesDeClase(pj.clase, n);
+  if (salv) { pj.salvComp = salv; partes.push('Salvaciones: ' + salv.map(c => CARS[CARS_PJ.findIndex(([x]) => x === c)]).join(', ')); }
   if (tipo === 'pacto') partes.push(`Pacto: ${pj.pacto.max} espacios de nivel ${pj.pacto.nivel}`);
   else if (tipo) partes.push(`Espacios: ${(tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[n].join(' / ')}`);
   if (defs.length) partes.push(defs.map(d => `${d.nombre.replace(/ \(.*\)$/, '')} ${pj.recursos.find(x => x.clave === d.clave).max}`).join(', '));
@@ -1896,6 +1923,13 @@ A.nuevoRecPJ = el => {
   pj.recursos.push(d ? { id: uid(), clave: d.clave, nombre: d.nombre, max: d.max(n, pj), usados: 0, reserva: !!d.reserva } : { id: uid(), nombre, max: 1, usados: 0, descanso: 'largo' });
   guardar(); refrescar();
   toast(d ? `${d.nombre}: ${TEXTO_REGLA[reglaRecurso({ clave: d.clave }, pj)]}` : `${nombre} añadido: ajusta los usos con + y − y el descanso con ⟳`);
+};
+A.togSalv = el => {
+  const pj = pjPorId(el.dataset.pj); if (!pj) return;
+  const k = el.dataset.k; pj.salvComp ||= [];
+  pj.salvComp = pj.salvComp.includes(k) ? pj.salvComp.filter(x => x !== k) : [...pj.salvComp, k];
+  guardar();
+  const sv = $('#pj-salv'); if (sv) sv.innerHTML = htmlSalvPJ(pj); else refrescar();
 };
 A.gastarReserva = el => {
   const pj = pjPorId(el.dataset.pj); const r = pj && (pj.recursos || []).find(x => x.id === el.dataset.id); if (!r) return;
@@ -2189,6 +2223,7 @@ I.pj = el => {
   if (k === 'nombre') { $('#cabecera h1').textContent = pj.nombre || 'Personaje'; document.title = (pj.nombre || 'Personaje') + ' · Encuentros D&D'; }
   const c = $('#pj-calc'); if (c) c.textContent = `Bonificador por competencia ${signo(bcDeNivel(pj.nivel))} (por su nivel)`;
   const md = $(`[data-mod="${k}"]`); if (md) md.textContent = pj[k] != null ? signo(modDe(pj[k])) : '—';
+  const sv = $('#pj-salv'); if (sv) sv.innerHTML = htmlSalvPJ(pj);
   const r = $('#pj-ini'); if (r) r.textContent = resumenIniPJ(pj);
 };
 I.fb = el => { FB[el.dataset.k] = el.value; actualizarResultados('fb'); };
@@ -2222,7 +2257,12 @@ C.pjSync = el => {
   const k = el.dataset.k;
   if (k === 'nivel') el.value = pj.nivel ?? '';
   // Al escribir la clase, que aparezca (o desaparezca) el botón de rellenar según la clase
-  if (k === 'clase') { sincronizarPJ(pj, k); refrescar(); return; }
+  if (k === 'clase') {
+    // Si aún no tiene salvaciones marcadas, se ponen las de su clase
+    const s = salvacionesDeClase(pj.clase, pj.nivel || 1);
+    if (s && !(pj.salvComp || []).length) { pj.salvComp = s; guardar(); }
+    sincronizarPJ(pj, k); refrescar(); return;
+  }
   // Características: entre 1 y 30 (SRD)
   if (CARS_PJ.some(([c]) => c === k) && pj[k] != null) {
     pj[k] = Math.max(1, Math.min(30, pj[k])); el.value = pj[k]; guardar();

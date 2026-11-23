@@ -422,6 +422,16 @@ details.accion > summary { padding: 8px 10px; cursor: pointer; list-style: none;
 .car-pj input { width: 100%; max-width: 70px; min-height: 40px; text-align: center; font-size: 1.15rem; font-weight: 700; border-radius: 10px; border: 1px solid var(--borde); background: var(--fondo); }
 .car-pj input:focus { outline: 2px solid var(--acento); outline-offset: 1px; border-color: transparent; }
 .car-pj b { font-size: 1rem; }
+.sub-tit { font-size: .92rem; margin: 14px 0 2px; }
+.salv-pj { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.salv-btn {
+  display: flex; justify-content: space-between; align-items: center; gap: 4px; min-height: 40px; padding: 6px 10px;
+  border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie); cursor: pointer; font-size: .9rem;
+}
+.salv-btn span { color: var(--suave); font-weight: 600; }
+.salv-btn.on { background: color-mix(in srgb, var(--pj) 22%, var(--superficie)); border-color: var(--pj); }
+.salv-btn.on span { color: var(--texto); }
+.salv-btn.on span::before { content: "● "; color: var(--pj); }
 
 /* ===== Espacios, recursos y usos limitados ===== */
 .rec-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--borde); }
