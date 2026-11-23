@@ -547,3 +547,4 @@ details.regla summary small.nv { align-self: center; }
 .wz-pg { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; background: var(--superficie2); font-size: .92rem; }
 .wz-op:disabled { opacity: .45; cursor: default; }
 .wz-bonus > span { width: auto; min-width: 44px; white-space: nowrap; }
+.wz-op small .no { color: var(--aviso); font-weight: 600; }
