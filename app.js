@@ -2188,8 +2188,44 @@ const wzNuevo = () => ({
   especie: null, linaje: null, tamano: null, aptitud: null, habEspecie: null, doteHumano: null, habDote: [],
   tiradas: ['', '', '', '', '', ''], orden: null, modoBonus: '21', bonus2: null, bonus1: null,
   alineamiento: null, nombre: '', jugador: '', descripcion: '', personalidad: '', idiomas: [],
-  conj: {}, magia: {}
+  conj: {}, magia: {}, pericia: [], herrClase: [], herrTras: [], herrDote: []
 });
+// ---- Herramientas (SRD 5.2.1, capítulo «Equipo») ----
+const HERR = () => (CR && CR.herramientas) || [];
+// Herramientas que una clase o un trasfondo dejan elegir
+function eleccionHerr(texto) {
+  const t = norm(texto || '');
+  if (/^elige tres instrumentos/.test(t)) return { n: 3, filtro: h => h.grupo === 'Instrumento musical', txt: 'Elige 3 instrumentos musicales' };
+  if (/^elige un tipo de herramientas de artesano o instrumento/.test(t)) return { n: 1, filtro: h => h.categoria === 'artesano' || h.grupo === 'Instrumento musical', txt: 'Elige 1 herramienta de artesano o instrumento musical' };
+  if (/^elige un tipo de juego/.test(t)) return { n: 1, filtro: h => h.grupo === 'Juego', txt: 'Elige 1 juego' };
+  return null;
+}
+const herrFija = txt => { const h = HERR().find(x => norm(x.nombre) === norm(txt)); return h ? h.nombre : txt.charAt(0).toUpperCase() + txt.slice(1); };
+// Herramientas con competencia y de dónde vienen
+function wzHerramientas() {
+  const w = WZ(), c = wzClase(), t = wzTras(), m = new Map();
+  const add = (n, origen) => { if (n && !m.has(norm(n))) m.set(norm(n), { nombre: n, origen }); };
+  if (c && c.herramientas) { if (eleccionHerr(c.herramientas)) (w.herrClase || []).forEach(n => add(n, 'clase')); else add(herrFija(c.herramientas), 'clase'); }
+  if (t && t.herramienta) { if (eleccionHerr(t.herramienta)) (w.herrTras || []).forEach(n => add(n, 'trasfondo')); else add(herrFija(t.herramienta), 'trasfondo'); }
+  if (w.especie === 'humano' && w.doteHumano === 'habilidoso') (w.herrDote || []).forEach(n => add(n, 'dote'));
+  return m;
+}
+const GRUPOS_HERR = [['Herramientas de artesano', h => h.categoria === 'artesano'], ['Instrumentos musicales', h => h.grupo === 'Instrumento musical'], ['Juegos', h => h.grupo === 'Juego'], ['Otras herramientas', h => h.categoria === 'otra' && !h.grupo]];
+// Chips para elegir herramientas (agrupadas). «ocupada» = ya la tiene por otro lado
+function htmlElegirHerr(k, filtro, elegidas, ocupada) {
+  return GRUPOS_HERR.map(([titulo, f]) => {
+    const ops = HERR().filter(h => f(h) && filtro(h)); if (!ops.length) return '';
+    return `<p class="wz-grupo-herr">${titulo}</p><div class="chips">${ops.map(h => wzChip('wzHerr', k, h.nombre, elegidas.includes(h.nombre), h.grupo ? h.nombre.replace(/^[^:]+:\s*/, '') : h.nombre, !elegidas.includes(h.nombre) && ocupada(h.nombre))).join('')}</div>`;
+  }).join('');
+}
+// ---- Pericia del pícaro (rasgo de nivel 1, SRD 5.2.1) ----
+const esPicaro = () => WZ().clase === 'picaro';
+function wzPericia() { const comp = wzCompetencias(); return (WZ().pericia || []).filter(h => comp.has(norm(h))); }
+function wzNombrePaso(i) {
+  if (i !== 4 || !CR || !E.borradorPJ) return WZ_PASOS[i];
+  const conj = wzGruposConj().length || wzConjFijos().length || wzMagiaDotes().length;
+  return esPicaro() ? (conj ? 'Pericia y conjuros' : 'Pericia') : 'Conjuros';
+}
 const WZ = () => E.borradorPJ;
 const wzClase = () => CR.clases.find(c => c.id === WZ().clase);
 const wzTras = () => CR.trasfondos.find(t => t.id === WZ().trasfondo);
@@ -2271,11 +2307,15 @@ function wzDotes() {
 }
 function wzFalta(p) {
   const w = WZ(), c = wzClase(), e = wzEsp();
-  if (p === 0) { if (!c) return 'Elige una clase'; if (w.habClase.length !== nHabClase(c)) return `Elige ${nHabClase(c)} habilidades de la clase`; }
+  if (p === 0) {
+    if (!c) return 'Elige una clase'; if (w.habClase.length !== nHabClase(c)) return `Elige ${nHabClase(c)} habilidades de la clase`;
+    const eh = eleccionHerr(c.herramientas); if (eh && (w.herrClase || []).length !== eh.n) return eh.txt + ' (herramientas de la clase)';
+  }
   if (p === 1) {
     const t = wzTras(); if (!t) return 'Elige un trasfondo';
     const rep = t.habilidades.filter(h => w.habClase.some(x => norm(x) === norm(h)));
     if (rep.length) return `${rep.join(' y ')} se repite: cámbiala en el paso de clase`;
+    const eh = eleccionHerr(t.herramienta); if (eh && (w.herrTras || []).length !== eh.n) return eh.txt + ' (herramienta del trasfondo)';
   }
   if (p === 2) {
     if (!e) return 'Elige una especie';
@@ -2284,10 +2324,11 @@ function wzFalta(p) {
     if (e.tamanos.length > 1 && !w.tamano) return 'Elige su tamaño';
     if ((e.id === 'elfo' || e.id === 'humano') && !w.habEspecie) return 'Elige la habilidad que da su especie';
     if (e.id === 'humano' && !w.doteHumano) return 'Elige la dote de origen (Versátil)';
-    if (e.id === 'humano' && w.doteHumano === 'habilidoso' && w.habDote.length !== 3) return 'Elige 3 habilidades para Habilidoso';
+    if (e.id === 'humano' && w.doteHumano === 'habilidoso' && w.habDote.length + (w.herrDote || []).length !== 3) return 'Habilidoso: elige 3 entre habilidades y herramientas';
   }
   if (p === 3 && !wzBase()) return 'Escribe las 6 tiradas (cada una entre 3 y 18)';
   if (p === 4) {
+    if (esPicaro() && wzPericia().length !== 2) return 'Pericia: elige 2 habilidades';
     for (const m of wzMagiaDotes()) { if (!m.lista) return 'Elige la lista de conjuros de Iniciado en la magia'; if (!m.apt) return 'Elige la aptitud mágica de Iniciado en la magia'; }
     for (const g of wzGruposConj()) if (g.elegidos.length !== g.n) return `${g.titulo}: elige ${g.n} (llevas ${g.elegidos.length})`;
   }
@@ -2309,6 +2350,7 @@ function wzPasoClase() {
       <div class="wz-det"><p><b>Salvaciones:</b> ${esc(c.salvaciones)}</p><p><b>Armaduras:</b> ${esc(c.armaduras)}</p><p><b>Armas:</b> ${esc(c.armas)}</p>${c.herramientas && !/^ninguna/i.test(c.herramientas) ? `<p><b>Herramientas:</b> ${esc(c.herramientas)}</p>` : ''}</div>
       <h3 class="sub-tit">Elige ${n} habilidades <span class="cuenta">${w.habClase.length}/${n}</span></h3>
       <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>
+      ${(() => { const eh = eleccionHerr(c.herramientas); return eh ? `<h3 class="sub-tit">Herramientas: ${eh.txt.toLowerCase()} <span class="cuenta">${(w.herrClase || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrClase', eh.filtro, w.herrClase || [], () => false)}` : ''; })()}
       <h3 class="sub-tit">Equipo inicial</h3>
       <div class="wz-ops">${Object.entries(c.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoClase', k, w.equipoClase === k, 'Opción ' + k, esc(v))).join('')}</div>
       <h3 class="sub-tit">Rasgos de nivel 1</h3>${wzRasgos(c.rasgos.filter(r => r.nivel === 1), 'rc')}</section>`;
@@ -2325,6 +2367,7 @@ function wzPasoTrasfondo() {
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(t.nombre)}</h2>
       <div class="wz-det"><p><b>Características:</b> ${t.caracteristicas.map(k => CAR_NOMBRE[k]).join(', ')} (las subirás en el paso de características)</p>
       <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p><p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
+      ${(() => { const eh = eleccionHerr(t.herramienta); if (!eh) return ''; const deClase = new Set((w.herrClase || []).map(norm)); return `<h3 class="sub-tit">${eh.txt} <span class="cuenta">${(w.herrTras || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrTras', eh.filtro, w.herrTras || [], n => deClase.has(norm(n)))}`; })()}
       ${repetidas.length ? `<div class="aviso malo"><span><b>${repetidas.map(esc).join(' y ')}</b> ya la${repetidas.length > 1 ? 's' : ''} elegiste en la clase. Vuelve al paso 1 y elige otra${repetidas.length > 1 ? 's' : ''} en su lugar.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}
       <h3 class="sub-tit">Dote: ${esc(t.dote)}</h3>${d ? `<div class="wz-det">${d.html}</div>` : ''}
       ${t.doteId === 'iniciado-en-la-magia' ? `<p class="nota">Los 2 trucos y el conjuro de nivel 1 de ${esc(t.doteNota)} los elegirás en el paso «Conjuros».</p>` : ''}
@@ -2355,8 +2398,19 @@ function wzPasoEspecie() {
     if (e.id === 'humano') {
       html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre))).join('')}</div>
         <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => wzOp('wzSet', 'doteHumano', d.id, w.doteHumano === d.id, d.nombre + (d.id === 'habilidoso' ? ' (recomendada)' : ''), '')).join('')}</div>`;
-      if (w.doteHumano === 'habilidoso') html += `<h3 class="sub-tit">Habilidoso: elige 3 habilidades <span class="cuenta">${w.habDote.length}/3</span></h3><p class="nota" style="margin-top:0">La dote también permite cambiar alguna por una herramienta; si lo prefieres, anótalo en sus notas.</p>
-        <div class="chips">${CR.habilidades.map(h => wzChip('wzHab', 'habDote', h.nombre, w.habDote.includes(h.nombre), h.nombre, ocupada(h.nombre) || norm(h.nombre) === norm(w.habEspecie))).join('')}</div>`;
+      if (w.doteHumano === 'habilidoso') {
+        const herrD = w.herrDote || [], total = w.habDote.length + herrD.length;
+        const yaHerr = wzHerramientas(), ocupadaH = n => yaHerr.has(norm(n)) && yaHerr.get(norm(n)).origen !== 'dote';
+        const propias = herrD.filter(n => !HERR().some(h => h.nombre === n));
+        html += `<h3 class="sub-tit">Habilidoso: elige 3 en total <span class="cuenta">${total}/3</span></h3>
+          <p class="nota" style="margin-top:0">Gana competencia en <b>3, combinando como quieras habilidades y herramientas</b>: 3 habilidades, 2 habilidades y 1 herramienta, 1 habilidad y 2 herramientas, o 3 herramientas.</p>
+          <p class="wz-grupo-herr">Habilidades</p>
+          <div class="chips">${CR.habilidades.map(h => wzChip('wzHab', 'habDote', h.nombre, w.habDote.includes(h.nombre), h.nombre, ocupada(h.nombre) || norm(h.nombre) === norm(w.habEspecie))).join('')}</div>
+          ${htmlElegirHerr('herrDote', () => true, herrD, ocupadaH)}
+          <p class="wz-grupo-herr">Herramienta personalizada</p>
+          ${propias.length ? `<div class="chips" style="margin-bottom:6px">${propias.map(n => wzChip('wzHerr', 'herrDote', n, true, n + ' ✕')).join('')}</div>` : ''}
+          <div class="fila-anadir"><input id="wz-herr-propia" placeholder="Escribe una herramienta inventada" maxlength="60" enterkeyhint="done"><button class="btn peq" data-a="wzHerrPropia">Añadir</button></div>`;
+      }
       else if (w.doteHumano) { const d = doteSRD(w.doteHumano); html += `<div class="wz-det">${d.html}</div>`; }
     }
     html += `<h3 class="sub-tit">Atributos especiales</h3>${wzRasgos(e.rasgos, 're')}</section>`;
@@ -2459,6 +2513,20 @@ function htmlGrupoConj(g, grupos, fijos) {
           <div class="f-txt" data-a="verConjuro" data-id="${c.id}"><div class="f-tit">${g.rec.includes(c.id) ? '<span class="wz-rec">★</span> ' : ''}${esc(c.nombre)} ${etiquetasConj(c)}</div><div class="f-sub">${esc(c.escuela)}${bloq ? ' · ya lo conoce por otro lado' : ''}</div></div></div>`;
       }).join('')}</div></div></details>`;
 }
+function htmlPericia() {
+  const comp = [...wzCompetencias().values()].map(x => x.nombre).sort((a, b) => a.localeCompare(b, 'es')), sel = wzPericia(), f = wzFinal();
+  const txt = h => { const s = CR.habilidades.find(x => norm(x.nombre) === norm(h)); if (!f || !s) return h; const m = modDe(f[s.car]); return `${h} ${signo(m + 2)} → ${signo(m + 4)}`; };
+  return `<div class="reglas-box"><div class="reglas-tit">Pericia · rasgo de pícaro de nivel 1</div>
+      <p style="margin:4px 0">Elige <b>2 habilidades en las que ya es competente</b>. En ellas su bonificador por competencia <b>se duplica</b> (a nivel 1 pasa de +2 a +4). No se puede tener pericia dos veces en la misma habilidad.</p>
+      <p style="margin:4px 0">El SRD recomienda <b>Juego de manos</b> y <b>Sigilo</b> si es competente en ellas (★). En el nivel 6 de pícaro ganará pericia en otras 2.</p></div>
+    <h3 class="sub-tit">Elige 2 habilidades <span class="cuenta">${sel.length}/2</span></h3>
+    <div class="chips">${comp.map(h => wzChip('wzPericia', 'pericia', h, sel.includes(h), (/^(Juego de manos|Sigilo)$/.test(h) ? '★ ' : '') + txt(h))).join('')}</div>`;
+}
+function wzPasoPericiaConjuros() {
+  if (!esPicaro()) return wzPasoConjuros();
+  const hay = wzGruposConj().length || wzConjFijos().length || wzMagiaDotes().length;
+  return htmlPericia() + (hay ? `<h2 style="font-size:1.05rem;margin:22px 0 4px">Conjuros</h2>${wzPasoConjuros()}` : '');
+}
 function wzPasoConjuros() {
   const w = WZ(), grupos = wzGruposConj(), fijos = wzConjFijos(), magia = wzMagiaDotes(), c = wzClase();
   if (!grupos.length && !fijos.length && !magia.length) return `<p class="vacio">Este personaje no conoce conjuros a nivel 1.<br>Puedes pasar al siguiente paso.</p>`;
@@ -2535,7 +2603,12 @@ function wzHoja() {
   if (/\bescudo\b/.test(eqClase)) { ca += 2; caNota += ' + escudo (+2)'; }
   const pg = Math.max(1, dadoGolpe(c) + md('con') + (e.id === 'enano' ? 1 : 0));
   const comp = wzCompetencias();
-  const habilidades = CR.habilidades.map(h => ({ ...h, comp: comp.has(norm(h.nombre)), origen: (comp.get(norm(h.nombre)) || {}).origen, total: md(h.car) + (comp.has(norm(h.nombre)) ? bc : 0) }));
+  const pericia = new Set((c.id === 'picaro' ? wzPericia() : []).map(norm));
+  const habilidades = CR.habilidades.map(h => {
+    const es = comp.has(norm(h.nombre)), per = es && pericia.has(norm(h.nombre));
+    return { ...h, comp: es, pericia: per, origen: (comp.get(norm(h.nombre)) || {}).origen, total: md(h.car) + (es ? bc * (per ? 2 : 1) : 0) };
+  });
+  const herramientas = [...wzHerramientas().values()].map(x => x.nombre);
   const percep = habilidades.find(h => h.id === 'percepcion');
   let vision = e.vision; if (l && l.vision) vision = l.vision;
   let velocidad = e.velocidad; if (l && l.velocidad) velocidad = l.velocidad;
@@ -2547,7 +2620,7 @@ function wzHoja() {
   const especieTxt = e.nombre + (l ? ` (${l.nombre.replace(/\s*\(.*\)$/, '')})` : '');
   const conjuros = wzConjElegidos().map(id => CONJ.get(id)).filter(Boolean).sort(ordenConj);
   const magia = wzMagiaDotes().filter(m => m.lista && m.apt);
-  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, conjuros, magia, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
+  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, herramientas, conjuros, magia, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
 }
 function wzPasoResumen() {
   const w = WZ(), h = wzHoja();
@@ -2562,14 +2635,15 @@ function wzPasoResumen() {
     <div class="cars-pj">${CARS_PJ.map(([k, n]) => `<div class="car-pj${h.salv.includes(k) ? ' comp' : ''}"><span>${n}</span><b class="wz-pt">${h.f[k]}</b><b>${signo(modDe(h.f[k]))}</b><small>Salv. ${signo(modDe(h.f[k]) + (h.salv.includes(k) ? h.bc : 0))}${h.salv.includes(k) ? ' ●' : ''}</small></div>`).join('')}</div>
     <p class="nota">● Competencia en la salvación (por su clase).</p>
     <h3 class="sub-tit">Habilidades</h3>
-    <div class="wz-habs">${h.habilidades.map(x => `<div class="${x.comp ? 'comp' : ''}"><span>${x.comp ? '● ' : ''}${esc(x.nombre)} <small>(${CAR_ABR[x.car]})</small></span><b>${signo(x.total)}</b></div>`).join('')}</div>
+    <div class="wz-habs">${h.habilidades.map(x => `<div class="${x.comp ? 'comp' : ''}"><span>${x.pericia ? '◆ ' : x.comp ? '● ' : ''}${esc(x.nombre)} <small>(${CAR_ABR[x.car]})</small></span><b>${signo(x.total)}</b></div>`).join('')}</div>
+    <p class="nota">● Competente (suma +${h.bc}).${h.habilidades.some(x => x.pericia) ? ` ◆ Pericia (suma +${h.bc * 2}).` : ''}</p>
     <div class="wz-det" style="margin-top:12px">
       ${fila('Tamaño', esc(h.tamano))}${h.vision ? fila('Visión en la oscuridad', h.vision + ' m') : ''}
       ${fila('Dotes', h.dotes.map(d => esc(d.nombre)).join(', '))}
       ${fila('Atributos de especie', h.e.rasgos.map(r => esc(r.nombre)).join(', ') + (h.l ? ` (${esc(h.l.nombre)}${w.aptitud ? ', aptitud mágica: ' + CAR_NOMBRE[w.aptitud] : ''})` : ''))}
       ${fila('Rasgos de clase', h.c.rasgos.filter(r => r.nivel === 1).map(r => esc(r.nombre)).join(', '))}
       ${fila('Armaduras', esc(h.c.armaduras))}${fila('Armas', esc(h.c.armas))}
-      ${fila('Herramienta', esc(h.t.herramienta))}
+      ${fila('Herramientas', h.herramientas.length ? h.herramientas.map(esc).join(', ') : '—')}
       ${h.conjuros.length ? fila('Trucos', h.conjuros.filter(c => !c.nivel).map(c => esc(c.nombre)).join(', ') || '—') + fila('Conjuros de nivel 1', h.conjuros.filter(c => c.nivel).map(c => esc(c.nombre)).join(', ') || '—') : ''}
       ${h.magia.map(m => fila('Iniciado en la magia', `lista de ${LISTAS_MAGIA.find(x => x[0] === m.lista)[1].toLowerCase()}, aptitud ${CAR_NOMBRE[m.apt]}`)).join('')}
       ${fila('Idiomas', h.idiomas.map(esc).join(', '))}
@@ -2582,14 +2656,14 @@ VISTAS.crear = () => {
   if (!CR) return { titulo: 'Crear personaje', atras: '#/personajes', html: '<p class="vacio">Faltan los datos de creación.</p>' };
   if (!E.borradorPJ) return { titulo: 'Crear personaje', atras: '#/personajes', html: `<p class="vacio">No hay ningún personaje a medio crear.</p><button class="btn primario ancho" data-a="crearPJ">Empezar uno</button>` };
   const w = WZ(), p = w.paso;
-  const cuerpo = [wzPasoClase, wzPasoTrasfondo, wzPasoEspecie, wzPasoCaracteristicas, wzPasoConjuros, wzPasoAlineamiento, wzPasoDetalles, wzPasoResumen][p]();
-  const html = `<p class="wz-paso">Paso ${p + 1} de ${WZ_PASOS.length} · ${WZ_PASOS[p]}</p>
-    <div class="wz-prog">${WZ_PASOS.map((n, i) => `<button class="${i < p ? 'hecho' : i === p ? 'actual' : ''}" data-a="wzIr" data-n="${i}" aria-label="Paso ${i + 1}: ${n}" ${i > p ? 'disabled' : ''}></button>`).join('')}</div>
+  const cuerpo = [wzPasoClase, wzPasoTrasfondo, wzPasoEspecie, wzPasoCaracteristicas, wzPasoPericiaConjuros, wzPasoAlineamiento, wzPasoDetalles, wzPasoResumen][p]();
+  const html = `<p class="wz-paso">Paso ${p + 1} de ${WZ_PASOS.length} · ${wzNombrePaso(p)}</p>
+    <div class="wz-prog">${WZ_PASOS.map((n, i) => `<button class="${i < p ? 'hecho' : i === p ? 'actual' : ''}" data-a="wzIr" data-n="${i}" aria-label="Paso ${i + 1}: ${wzNombrePaso(i)}" ${i > p ? 'disabled' : ''}></button>`).join('')}</div>
     ${cuerpo}`;
   const ultimo = p === WZ_PASOS.length - 1;
   return {
     titulo: 'Crear personaje', atras: '#/personajes', html, sinNav: true,
-    pie: `${p > 0 ? `<button class="btn secundario" data-a="wzAtras">Atrás</button>` : ''}<button class="btn ${ultimo ? 'ok' : 'primario'}" data-a="${ultimo ? 'wzCrear' : 'wzSig'}">${ultimo ? 'Crear personaje' : 'Siguiente: ' + WZ_PASOS[p + 1]}</button>`
+    pie: `${p > 0 ? `<button class="btn secundario" data-a="wzAtras">Atrás</button>` : ''}<button class="btn ${ultimo ? 'ok' : 'primario'}" data-a="${ultimo ? 'wzCrear' : 'wzSig'}">${ultimo ? 'Crear personaje' : 'Siguiente: ' + wzNombrePaso(p + 1)}</button>`
   };
 };
 function wzPintar(arriba) { guardar(); render(); if (arriba) window.scrollTo(0, 0); }
@@ -2605,21 +2679,49 @@ A.wzSet = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v;
   if (w[k] === v && (k === 'habEspecie' || k === 'doteHumano')) w[k] = null; else w[k] = v;
   w.magia ||= {};
-  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.conj = {}; }
-  if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; delete w.magia.trasfondo; }
-  if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; delete w.magia.especie; }
-  if (k === 'doteHumano') { w.habDote = []; delete w.magia.especie; }
+  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.conj = {}; w.herrClase = []; w.pericia = []; }
+  if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; delete w.magia.trasfondo; w.herrTras = []; }
+  if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; w.herrDote = []; delete w.magia.especie; }
+  if (k === 'doteHumano') { w.habDote = []; w.herrDote = []; delete w.magia.especie; }
   wzPintar(false);
   if (['clase', 'trasfondo', 'especie'].includes(k)) { const d = $('#wz-detalle'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 };
 A.wzHab = el => {
   const w = WZ(), lista = w[el.dataset.k], v = el.dataset.v;
-  const max = el.dataset.k === 'habClase' ? nHabClase(wzClase()) : 3;
+  const esDote = el.dataset.k === 'habDote';
+  const max = esDote ? 3 - (w.herrDote || []).length : nHabClase(wzClase());
   const i = lista.indexOf(v);
   if (i >= 0) lista.splice(i, 1);
-  else if (lista.length >= max) { toast(`Ya has elegido ${max}. Quita una primero.`); return; }
+  else if (lista.length >= max) { toast(esDote ? 'Habilidoso: ya tienes 3 entre habilidades y herramientas. Quita una primero.' : `Ya has elegido ${max}. Quita una primero.`); return; }
   else lista.push(v);
   wzPintar(false);
+};
+// Elegir o quitar una herramienta (de la clase, del trasfondo o de Habilidoso)
+A.wzHerr = el => {
+  const w = WZ(), k = el.dataset.k, v = el.dataset.v;
+  w[k] ||= [];
+  const lista = w[k], i = lista.indexOf(v);
+  if (i >= 0) { lista.splice(i, 1); wzPintar(false); return; }
+  let max;
+  if (k === 'herrDote') max = 3 - w.habDote.length;
+  else max = (eleccionHerr(k === 'herrClase' ? wzClase().herramientas : wzTras().herramienta) || { n: 0 }).n;
+  if (lista.length >= max) { toast(k === 'herrDote' ? 'Habilidoso: ya tienes 3 entre habilidades y herramientas. Quita una primero.' : `Ya has elegido ${max}. Quita una primero.`); return; }
+  lista.push(v); wzPintar(false);
+};
+A.wzHerrPropia = () => {
+  const w = WZ(), inp = $('#wz-herr-propia'), v = (inp && inp.value || '').trim().replace(/\s+/g, ' ');
+  if (!v) { toast('Escribe el nombre de la herramienta'); inp && inp.focus(); return; }
+  w.herrDote ||= [];
+  if ([...wzHerramientas().keys()].includes(norm(v))) { toast('Ya tiene esa herramienta'); return; }
+  if (w.habDote.length + w.herrDote.length >= 3) { toast('Habilidoso: ya tienes 3 entre habilidades y herramientas. Quita una primero.'); return; }
+  w.herrDote.push(v.charAt(0).toUpperCase() + v.slice(1)); wzPintar(false);
+};
+A.wzPericia = el => {
+  const w = WZ(), v = el.dataset.v, sel = wzPericia(), i = sel.indexOf(v);
+  if (i >= 0) sel.splice(i, 1);
+  else if (sel.length >= 2) { toast('Ya has elegido 2. Quita una primero.'); return; }
+  else sel.push(v);
+  w.pericia = sel; wzPintar(false);
 };
 A.wzIdioma = el => {
   const w = WZ(), v = el.dataset.v, i = w.idiomas.indexOf(v);
@@ -2659,7 +2761,8 @@ A.wzCrear = () => {
     `Dotes: ${h.dotes.map(d => d.nombre).join(', ')}`,
     ...h.magia.map(m => `Iniciado en la magia: lista de ${LISTAS_MAGIA.find(x => x[0] === m.lista)[1].toLowerCase()}, aptitud ${CAR_NOMBRE[m.apt]}`),
     w.aptitud && `Aptitud mágica del linaje: ${CAR_NOMBRE[w.aptitud]}`,
-    `Herramienta: ${h.t.herramienta}`,
+    h.habilidades.some(x => x.pericia) && `Pericia: ${h.habilidades.filter(x => x.pericia).map(x => x.nombre).join(', ')}`,
+    `Herramientas: ${h.herramientas.join(', ') || '—'}`,
     `Idiomas: ${h.idiomas.join(', ')}`,
     `Equipo: ${h.equipo.join(' + ')}`,
     w.descripcion.trim() && `Descripción: ${w.descripcion.trim()}`,
@@ -2670,7 +2773,7 @@ A.wzCrear = () => {
     ca: h.ca, pgMax: h.pg, ...h.f, salvComp: h.salv.slice(), iniDes: true, alerta: h.alerta, iniBC: h.alerta, iniExtra: 0,
     pasiva: h.pasiva, notas, conjuros: h.conjuros.map(c => c.id),
     hoja: { clase: h.c.id, trasfondo: h.t.id, especie: h.e.id, linaje: w.linaje, aptitud: w.aptitud, tamano: h.tamano, alineamiento: w.alineamiento,
-      habilidades: comp, dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramienta: h.t.herramienta,
+      habilidades: comp, pericia: h.habilidades.filter(x => x.pericia).map(x => x.nombre), dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramientas: h.herramientas,
       conj: JSON.parse(JSON.stringify(w.conj || {})), magia: h.magia.map(m => ({ origen: m.origen, lista: m.lista, apt: m.apt, trucos: m.est.T, conjuros: m.est.C })), conjEspecie: wzConjFijos(),
       tiradas: w.tiradas.map(Number), orden: wzOrden(), bonus: wzBonus(), descripcion: w.descripcion.trim(), personalidad: w.personalidad.trim(), creado: Date.now() }
   };

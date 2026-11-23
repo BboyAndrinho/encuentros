@@ -541,3 +541,4 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .wz-grupo.completo { border-color: color-mix(in srgb, var(--ok) 55%, var(--borde)); }
 .marca-conj:disabled { opacity: .35; cursor: default; }
 span.marca-conj { display: inline-grid; place-items: center; }
+.wz-grupo-herr { margin: 10px 0 4px; font-size: .78rem; font-weight: 700; color: var(--suave); text-transform: uppercase; letter-spacing: .03em; }
