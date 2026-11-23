@@ -533,3 +533,11 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .wz-habs div:not(.comp) { color: var(--suave); }
 .wz-habs small { font-weight: 500; opacity: .8; }
 @media (max-width: 360px) { .wz-habs { grid-template-columns: 1fr; } }
+.wz-op-det { margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--acento) 35%, transparent); font-size: .9rem; line-height: 1.45; font-weight: 400; }
+.wz-op-det p { margin: 4px 0; }
+.wz-rec { color: var(--aviso); }
+.wz-grupo summary > span { display: flex; flex-direction: column; gap: 2px; }
+.wz-grupo summary small { font-weight: 500; color: var(--suave); font-size: .82rem; }
+.wz-grupo.completo { border-color: color-mix(in srgb, var(--ok) 55%, var(--borde)); }
+.marca-conj:disabled { opacity: .35; cursor: default; }
+span.marca-conj { display: inline-grid; place-items: center; }

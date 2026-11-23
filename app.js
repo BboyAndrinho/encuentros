@@ -2174,14 +2174,21 @@ function htmlResumen(r) {
 
 // ============ Creador de personajes (SRD 5.2.1, paso a paso) ============
 const CR = window.CREACION || null;
-const WZ_PASOS = ['Clase', 'Trasfondo', 'Especie', 'Características', 'Alineamiento', 'Detalles', 'Resumen'];
+const WZ_PASOS = ['Clase', 'Trasfondo', 'Especie', 'Características', 'Conjuros', 'Alineamiento', 'Detalles', 'Resumen'];
+// Trucos y conjuros de nivel 1 que elige cada clase al crear el personaje (rasgo Lanzamiento de conjuros, SRD 5.2.1)
+const CONJ_CLASE_N1 = {
+  bardo: { trucos: 2, conjuros: 4 }, brujo: { trucos: 2, conjuros: 2 }, clerigo: { trucos: 3, conjuros: 4 }, druida: { trucos: 2, conjuros: 4 },
+  explorador: { trucos: 0, conjuros: 2 }, hechicero: { trucos: 4, conjuros: 2 }, mago: { trucos: 3, conjuros: 6, libro: 4 }, paladin: { trucos: 0, conjuros: 2 }
+};
+const LISTAS_MAGIA = [['clerigo', 'Clérigo'], ['druida', 'Druida'], ['mago', 'Mago']];
 const CAR_NOMBRE = Object.fromEntries(CARS_PJ);
 const CAR_ABR = Object.fromEntries(CARS_PJ.map(([k], i) => [k, CARS[i]]));
 const wzNuevo = () => ({
   paso: 0, clase: null, habClase: [], equipoClase: 'A', trasfondo: null, equipoTras: 'A',
   especie: null, linaje: null, tamano: null, aptitud: null, habEspecie: null, doteHumano: null, habDote: [],
   tiradas: ['', '', '', '', '', ''], orden: null, modoBonus: '21', bonus2: null, bonus1: null,
-  alineamiento: null, nombre: '', jugador: '', descripcion: '', personalidad: '', idiomas: []
+  alineamiento: null, nombre: '', jugador: '', descripcion: '', personalidad: '', idiomas: [],
+  conj: {}, magia: {}
 });
 const WZ = () => E.borradorPJ;
 const wzClase = () => CR.clases.find(c => c.id === WZ().clase);
@@ -2196,6 +2203,27 @@ const ARMADURAS_INICIALES = [
   { re: /camisa de malla/, nombre: 'camisa de malla', base: 13, maxDes: 2 },
   { re: /cota de malla/, nombre: 'cota de malla', base: 16, maxDes: 0 }
 ];
+// Resumen corto de cada linaje (se ve antes de elegirlo)
+const RESUMEN_LINAJE = {
+  azul: 'Aliento de relámpago · resistencia al relámpago', blanco: 'Aliento de frío · resistencia al frío', bronce: 'Aliento de relámpago · resistencia al relámpago',
+  cobre: 'Aliento de ácido · resistencia al ácido', negro: 'Aliento de ácido · resistencia al ácido', oro: 'Aliento de fuego · resistencia al fuego',
+  oropel: 'Aliento de fuego · resistencia al fuego', plata: 'Aliento de frío · resistencia al frío', rojo: 'Aliento de fuego · resistencia al fuego', verde: 'Aliento de veneno · resistencia al veneno',
+  'alto-elfo': 'Truco prestidigitación (puede cambiarlo por otro truco de mago)', drow: 'Visión en la oscuridad de 36 m · truco luces danzantes', 'elfo-de-los-bosques': 'Velocidad de 10,5 m · truco saber druídico',
+  'gnomo-de-las-rocas': 'Trucos prestidigitación y reparar · fabrica pequeños aparatos mecánicos', 'gnomo-de-los-bosques': 'Truco ilusión menor · hablar con los animales sin gastar espacios',
+  'abrasion-del-fuego': 'Al acertar un ataque, +1d10 de daño de fuego', 'caida-de-las-colinas': 'Al acertar un ataque, puede derribar al objetivo',
+  'excursion-de-las-nubes': 'Acción adicional: teletransporte de hasta 9 m', 'frio-de-la-escarcha': 'Al acertar un ataque, +1d6 de frío y le quita 3 m de velocidad',
+  'resistencia-de-la-piedra': 'Reacción: reduce el daño que recibe en 1d12 + Con', 'trueno-de-la-tormenta': 'Reacción: 1d8 de trueno a quien le dañe (a 18 m o menos)',
+  abisal: 'Resistencia al veneno · truco rociada venenosa', ctonico: 'Resistencia al daño necrótico · truco toque helado', infernal: 'Resistencia al fuego · truco descarga de fuego'
+};
+// Descripción completa de UN linaje (la del SRD)
+function detalleLinaje(e, o) {
+  if (o.dano) return `<p>Tu <b>Ataque de aliento</b> causa daño de <b>${esc(o.dano)}</b> y tienes <b>resistencia</b> al daño de ${esc(o.dano)}. Tu aspecto recuerda a un dragón ${esc(o.nombre.toLowerCase())}.</p>`;
+  if (o.nivel1) return `<p><b>Nivel 1:</b> ${o.nivel1}</p>${o.nivel3 ? `<p><b>Nivel 3:</b> aprende <em>${esc(o.nivel3.toLowerCase())}</em>. <b>Nivel 5:</b> aprende <em>${esc(o.nivel5.toLowerCase())}</em>. Puede lanzar cada uno una vez sin gastar espacio (se recupera con un descanso largo).</p>` : ''}`;
+  // Gnomo y goliat: el texto de cada opción está dentro del rasgo del linaje
+  const r = e.rasgos.find(x => x.nombre === e.linaje.rasgo);
+  const p = r && r.html.split(/<\/p><p>/).map(x => x.replace(/^<p>|<\/p>$/g, '')).find(x => norm(x.replace(/<[^>]+>/g, '')).startsWith(norm(o.nombre)));
+  return p ? `<p>${p.replace(/^<strong>[^<]*<\/strong>\s*/, '')}</p>` : '';
+}
 const dadoGolpe = c => +String(c.dado).replace(/^\d*d/i, '') || 8;
 const nHabClase = c => c.habilidades.n || (c.habilidades.cualquiera ? 3 : 2);
 const opcionesHabClase = c => c.habilidades.cualquiera ? CR.habilidades.map(h => h.nombre) : c.habilidades.opciones;
@@ -2259,8 +2287,12 @@ function wzFalta(p) {
     if (e.id === 'humano' && w.doteHumano === 'habilidoso' && w.habDote.length !== 3) return 'Elige 3 habilidades para Habilidoso';
   }
   if (p === 3 && !wzBase()) return 'Escribe las 6 tiradas (cada una entre 3 y 18)';
-  if (p === 4 && !w.alineamiento) return 'Elige un alineamiento';
-  if (p === 5) { if (!w.nombre.trim()) return 'Escribe el nombre del personaje'; if (w.idiomas.length !== 2) return 'Elige 2 idiomas además del común'; }
+  if (p === 4) {
+    for (const m of wzMagiaDotes()) { if (!m.lista) return 'Elige la lista de conjuros de Iniciado en la magia'; if (!m.apt) return 'Elige la aptitud mágica de Iniciado en la magia'; }
+    for (const g of wzGruposConj()) if (g.elegidos.length !== g.n) return `${g.titulo}: elige ${g.n} (llevas ${g.elegidos.length})`;
+  }
+  if (p === 5 && !w.alineamiento) return 'Elige un alineamiento';
+  if (p === 6) { if (!w.nombre.trim()) return 'Escribe el nombre del personaje'; if (w.idiomas.length !== 2) return 'Elige 2 idiomas además del común'; }
   return '';
 }
 const wzOp = (accion, k, v, on, titulo, sub) => `<button class="wz-op${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}"><b>${esc(titulo)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
@@ -2295,7 +2327,7 @@ function wzPasoTrasfondo() {
       <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p><p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
       ${repetidas.length ? `<div class="aviso malo"><span><b>${repetidas.map(esc).join(' y ')}</b> ya la${repetidas.length > 1 ? 's' : ''} elegiste en la clase. Vuelve al paso 1 y elige otra${repetidas.length > 1 ? 's' : ''} en su lugar.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}
       <h3 class="sub-tit">Dote: ${esc(t.dote)}</h3>${d ? `<div class="wz-det">${d.html}</div>` : ''}
-      ${t.doteId === 'iniciado-en-la-magia' ? `<p class="nota">Elige 2 trucos y 1 conjuro de nivel 1 de la lista de ${esc(t.doteNota)}; podrás añadirlos en «Conjuros» del perfil.</p>` : ''}
+      ${t.doteId === 'iniciado-en-la-magia' ? `<p class="nota">Los 2 trucos y el conjuro de nivel 1 de ${esc(t.doteNota)} los elegirás en el paso «Conjuros».</p>` : ''}
       <h3 class="sub-tit">Equipo</h3>
       <div class="wz-ops">${Object.entries(t.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoTras', k, w.equipoTras === k, 'Opción ' + k, esc(v))).join('')}</div></section>`;
   }
@@ -2311,8 +2343,11 @@ function wzPasoEspecie() {
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(e.nombre)}</h2>`;
     if (e.linaje) {
       const l = e.linaje;
-      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><div class="wz-ops">${l.opciones.map(o => wzOp('wzSet', 'linaje', o.id, o.id === w.linaje, o.nombre,
-        o.dano ? 'Daño de ' + esc(o.dano) : o.nivel1 ? `${o.nivel1}${o.nivel3 ? `<br>Nivel 3: <em>${esc(o.nivel3)}</em> · Nivel 5: <em>${esc(o.nivel5)}</em>` : ''}` : '')).join('')}</div>`;
+      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><p class="nota" style="margin-top:0">Toca uno para elegirlo y leer lo que da.</p>
+        <div class="wz-ops">${l.opciones.map(o => {
+          const on = o.id === w.linaje;
+          return `<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="linaje" data-v="${o.id}" aria-pressed="${on}" aria-expanded="${on}"><b>${esc(o.nombre)}</b><small>${esc(RESUMEN_LINAJE[o.id] || '')}</small>${on ? `<div class="wz-op-det">${detalleLinaje(e, o)}</div>` : ''}</button>`;
+        }).join('')}</div>`;
       if (l.aptitud) html += `<h3 class="sub-tit">Aptitud mágica del linaje</h3><div class="seg">${['int', 'sab', 'car'].map(k => `<button class="opc ${w.aptitud === k ? 'on' : ''}" data-a="wzSet" data-k="aptitud" data-v="${k}">${CAR_NOMBRE[k]}</button>`).join('')}</div>`;
     }
     if (e.tamanos.length > 1) html += `<h3 class="sub-tit">Tamaño</h3><div class="seg">${e.tamanos.map(t => `<button class="opc ${w.tamano === t ? 'on' : ''}" data-a="wzSet" data-k="tamano" data-v="${t}">${t}</button>`).join('')}</div><p class="nota" style="margin-top:0">${esc(e.tamanoTexto)}</p>`;
@@ -2365,6 +2400,107 @@ function wzPasoCaracteristicas() {
     <div class="wz-tiradas">${w.tiradas.map((v, i) => `<label class="car-pj"><span>Tirada ${i + 1}</span><input data-in="wzTirada" data-n="${i}" type="number" inputmode="numeric" min="3" max="18" value="${esc(v)}" enterkeyhint="next"></label>`).join('')}</div>
     <div id="wz-calc">${htmlWzCalculo()}</div>`;
 }
+// ---- Conjuros del creador ----
+// Conjuros recomendados por el SRD en el rasgo de la clase («Se recomiendan …»)
+function recomendadosClase(c, tipo) {
+  const r = c.rasgos.find(x => x.nivel === 1 && /Lanzamiento de conjuros|Magia del pacto/.test(x.nombre)); if (!r) return [];
+  const ps = r.html.split(/<\/p><p>/).map(x => x.replace(/<[^>]+>/g, ''));
+  const p = ps.find(x => tipo === 'T' ? /^Trucos\./.test(x) : !/^Trucos\./.test(x) && /Se recomiendan/.test(x));
+  const m = p && p.match(/Se recomiendan ([^.]+)\./); if (!m) return [];
+  return m[1].split(/,\s*|\s+y\s+|\s+e\s+/).map(n => CONJS.find(x => norm(x.nombre) === norm(n.trim()))).filter(Boolean).map(x => x.id);
+}
+// Dotes «Iniciado en la magia» que tiene (por el trasfondo y/o por la dote de humano)
+function wzMagiaDotes() {
+  const w = WZ(), t = wzTras(), out = [];
+  w.magia ||= {};
+  const nuevo = () => ({ lista: null, apt: null, T: [], C: [] });
+  if (t && t.doteId === 'iniciado-en-la-magia') out.push({ origen: 'trasfondo', fija: slug(t.doteNota), est: (w.magia.trasfondo ||= nuevo()) });
+  if (w.especie === 'humano' && w.doteHumano === 'iniciado-en-la-magia') out.push({ origen: 'especie', fija: null, est: (w.magia.especie ||= nuevo()) });
+  return out.map(m => ({ ...m, lista: m.fija || m.est.lista, apt: m.est.apt }));
+}
+// Conjuros que da la especie sin elegir (linaje y tiefling)
+function wzConjFijos() {
+  const e = wzEsp(), l = wzLinaje(), ids = [];
+  if (l) ids.push(...(l.trucos || []), ...(l.conjuros || []));
+  if (e && e.id === 'tiefling') ids.push('taumaturgia');
+  return [...new Set(ids)].filter(id => CONJ.has(id));
+}
+function wzGruposConj() {
+  const w = WZ(), c = wzClase(), g = [];
+  w.conj ||= {};
+  const cfg = c && CONJ_CLASE_N1[c.id];
+  if (cfg) {
+    const nom = c.nombre.toLowerCase();
+    if (cfg.trucos) g.push({ clave: 'claseT', origen: 'clase', titulo: `Trucos de ${nom}`, lista: c.id, nivel: 0, n: cfg.trucos, rec: recomendadosClase(c, 'T'), elegidos: (w.conj.claseT ||= []) });
+    g.push({ clave: 'claseC', origen: 'clase', titulo: cfg.libro ? 'Conjuros de nivel 1 para su libro' : `Conjuros de nivel 1 de ${nom}`, lista: c.id, nivel: 1, n: cfg.conjuros, rec: recomendadosClase(c, 'C'), elegidos: (w.conj.claseC ||= []),
+      nota: cfg.libro ? `Los ${cfg.conjuros} se apuntan en su libro de conjuros. Cada día prepara ${cfg.libro} de ellos.` : 'Son los conjuros que tiene preparados. Podrá cambiarlos al subir de nivel.' });
+  }
+  for (const m of wzMagiaDotes()) if (m.lista) {
+    const ln = LISTAS_MAGIA.find(x => x[0] === m.lista)[1].toLowerCase();
+    g.push({ clave: `magia-${m.origen}-T`, origen: m.origen, titulo: `Trucos de ${ln} (Iniciado en la magia)`, lista: m.lista, nivel: 0, n: 2, rec: [], elegidos: m.est.T });
+    g.push({ clave: `magia-${m.origen}-C`, origen: m.origen, titulo: `Conjuro de nivel 1 de ${ln} (Iniciado en la magia)`, lista: m.lista, nivel: 1, n: 1, rec: [], elegidos: m.est.C,
+      nota: 'Siempre lo tiene preparado. Puede lanzarlo una vez sin gastar espacio de conjuro (se recupera con un descanso largo).' });
+  }
+  return g;
+}
+const wzConjElegidos = () => [...new Set([...wzConjFijos(), ...wzGruposConj().flatMap(g => g.elegidos)])];
+function htmlGrupoConj(g, grupos, fijos) {
+  const otros = new Set([...fijos, ...grupos.filter(x => x !== g).flatMap(x => x.elegidos)]);
+  const lista = CONJS.filter(x => x.nivel === g.nivel && (x.clases || []).some(k => slug(k) === g.lista))
+    .sort((a, b) => (g.rec.includes(b.id) - g.rec.includes(a.id)) || a.nombre.localeCompare(b.nombre, 'es'));
+  const completo = g.elegidos.length === g.n;
+  const nombres = g.elegidos.map(id => CONJ.get(id)?.nombre).filter(Boolean);
+  return `<details class="regla wz-grupo${completo ? ' completo' : ''}" ${completo ? '' : 'open'}>
+    <summary><span><b>${esc(g.titulo)} <span class="cuenta">${g.elegidos.length}/${g.n}</span></b>${nombres.length ? `<small>${nombres.map(esc).join(', ')}</small>` : ''}</span></summary>
+    <div class="cuerpo">${g.nota ? `<p class="nota" style="margin-top:0">${g.nota}</p>` : ''}
+      <div class="lista">${lista.map(c => {
+        const on = g.elegidos.includes(c.id), bloq = !on && otros.has(c.id);
+        return `<div class="fila"><button class="marca-conj ${on ? 'on' : ''}" data-a="wzConj" data-g="${g.clave}" data-id="${c.id}" aria-label="${on ? 'Quitar' : 'Elegir'} ${esc(c.nombre)}" ${bloq ? 'disabled' : ''}>${on ? '✓' : '+'}</button>
+          <div class="f-txt" data-a="verConjuro" data-id="${c.id}"><div class="f-tit">${g.rec.includes(c.id) ? '<span class="wz-rec">★</span> ' : ''}${esc(c.nombre)} ${etiquetasConj(c)}</div><div class="f-sub">${esc(c.escuela)}${bloq ? ' · ya lo conoce por otro lado' : ''}</div></div></div>`;
+      }).join('')}</div></div></details>`;
+}
+function wzPasoConjuros() {
+  const w = WZ(), grupos = wzGruposConj(), fijos = wzConjFijos(), magia = wzMagiaDotes(), c = wzClase();
+  if (!grupos.length && !fijos.length && !magia.length) return `<p class="vacio">Este personaje no conoce conjuros a nivel 1.<br>Puedes pasar al siguiente paso.</p>`;
+  let html = `<p class="nota">Los <b>trucos</b> se lanzan a voluntad, sin gastar espacios. Los <b>conjuros de nivel 1</b> gastan un espacio de conjuro. <span class="wz-rec">★</span> = recomendado por el SRD. Toca el nombre de un conjuro para leerlo, y <b>+</b> para elegirlo.</p>`;
+  const deClase = grupos.filter(g => g.origen === 'clase');
+  if (deClase.length) html += `<h3 class="sub-tit">Por su clase (${esc(c.nombre)})</h3>${deClase.map(g => htmlGrupoConj(g, grupos, fijos)).join('')}`;
+  for (const m of magia) {
+    html += `<h3 class="sub-tit">Dote Iniciado en la magia (por su ${m.origen === 'trasfondo' ? 'trasfondo' : 'especie'})</h3>
+      <p class="nota" style="margin-top:0">Aprende 2 trucos y 1 conjuro de nivel 1 de una lista de conjuros${m.fija ? `: la de <b>${esc(LISTAS_MAGIA.find(x => x[0] === m.fija)[1].toLowerCase())}</b>, que fija su trasfondo` : ''}.</p>`;
+    if (!m.fija) {
+      const otra = magia.find(x => x !== m && x.lista);
+      html += `<div class="wz-bonus"><span>Lista</span><div class="seg">${LISTAS_MAGIA.map(([k, n]) => `<button class="opc ${m.est.lista === k ? 'on' : ''}" data-a="wzMagia" data-o="${m.origen}" data-k="lista" data-v="${k}" ${otra && otra.lista === k ? 'disabled' : ''}>${n}</button>`).join('')}</div></div>`;
+    }
+    html += `<div class="wz-bonus"><span>Aptitud</span><div class="seg">${['int', 'sab', 'car'].map(k => `<button class="opc ${m.est.apt === k ? 'on' : ''}" data-a="wzMagia" data-o="${m.origen}" data-k="apt" data-v="${k}">${CAR_NOMBRE[k]}</button>`).join('')}</div></div>
+      <p class="nota" style="margin-top:2px">La aptitud mágica es la característica con la que lanza estos conjuros.</p>`;
+    html += grupos.filter(g => g.origen === m.origen && g.clave.startsWith('magia')).map(g => htmlGrupoConj(g, grupos, fijos)).join('');
+  }
+  if (fijos.length) {
+    const l = wzLinaje();
+    html += `<h3 class="sub-tit">Por su especie (${esc(wzEsp().nombre)}${l ? ', ' + esc(l.nombre) : ''}) ya conoce</h3>
+      <div class="lista">${fijos.map(id => { const x = CONJ.get(id); return `<div class="fila"><span class="marca-conj on">✓</span><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}</div></div></div>`; }).join('')}</div>
+      ${l && l.nivel3 ? `<p class="nota">En los niveles 3 y 5 aprenderá <em>${esc(l.nivel3.toLowerCase())}</em> y <em>${esc(l.nivel5.toLowerCase())}</em>.</p>` : ''}
+      ${w.linaje === 'alto-elfo' ? '<p class="nota">Tras un descanso largo puede cambiar <em>prestidigitación</em> por otro truco de mago.</p>' : ''}`;
+  }
+  return html;
+}
+A.wzConj = el => {
+  const g = wzGruposConj().find(x => x.clave === el.dataset.g); if (!g) return;
+  const id = el.dataset.id, i = g.elegidos.indexOf(id);
+  if (i >= 0) g.elegidos.splice(i, 1);
+  else if (g.elegidos.length >= g.n) { toast(`Ya has elegido ${g.n}. Quita uno primero.`); return; }
+  else g.elegidos.push(id);
+  wzPintar(false);
+};
+A.wzMagia = el => {
+  wzMagiaDotes();
+  const est = WZ().magia[el.dataset.o]; if (!est) return;
+  est[el.dataset.k] = el.dataset.v;
+  if (el.dataset.k === 'lista') { est.T = []; est.C = []; }
+  wzPintar(false);
+};
+
 function wzPasoAlineamiento() {
   const w = WZ();
   return `<p class="nota">El alineamiento resume su actitud: la moral (bueno, neutral o malvado) y su relación con el orden (legal, neutral o caótico).</p>
@@ -2409,7 +2545,9 @@ function wzHoja() {
   const salv = SALVACIONES_CLASE[c.id] || [];
   const equipo = [c.equipoOpciones[w.equipoClase], t.equipoOpciones[w.equipoTras]].filter(Boolean);
   const especieTxt = e.nombre + (l ? ` (${l.nombre.replace(/\s*\(.*\)$/, '')})` : '');
-  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
+  const conjuros = wzConjElegidos().map(id => CONJ.get(id)).filter(Boolean).sort(ordenConj);
+  const magia = wzMagiaDotes().filter(m => m.lista && m.apt);
+  return { c, t, e, l, f, bc, ca, caNota, pg, alerta, dotes, habilidades, conjuros, magia, pasiva: 10 + percep.total, vision, velocidad, tamano, alin, idiomas, salv, equipo, especieTxt };
 }
 function wzPasoResumen() {
   const w = WZ(), h = wzHoja();
@@ -2432,6 +2570,8 @@ function wzPasoResumen() {
       ${fila('Rasgos de clase', h.c.rasgos.filter(r => r.nivel === 1).map(r => esc(r.nombre)).join(', '))}
       ${fila('Armaduras', esc(h.c.armaduras))}${fila('Armas', esc(h.c.armas))}
       ${fila('Herramienta', esc(h.t.herramienta))}
+      ${h.conjuros.length ? fila('Trucos', h.conjuros.filter(c => !c.nivel).map(c => esc(c.nombre)).join(', ') || '—') + fila('Conjuros de nivel 1', h.conjuros.filter(c => c.nivel).map(c => esc(c.nombre)).join(', ') || '—') : ''}
+      ${h.magia.map(m => fila('Iniciado en la magia', `lista de ${LISTAS_MAGIA.find(x => x[0] === m.lista)[1].toLowerCase()}, aptitud ${CAR_NOMBRE[m.apt]}`)).join('')}
       ${fila('Idiomas', h.idiomas.map(esc).join(', '))}
       ${fila('Equipo', h.equipo.map(esc).join(' + '))}
       ${w.descripcion.trim() ? fila('Descripción', esc(w.descripcion)) : ''}${w.personalidad.trim() ? fila('Personalidad e historia', esc(w.personalidad)) : ''}
@@ -2442,7 +2582,7 @@ VISTAS.crear = () => {
   if (!CR) return { titulo: 'Crear personaje', atras: '#/personajes', html: '<p class="vacio">Faltan los datos de creación.</p>' };
   if (!E.borradorPJ) return { titulo: 'Crear personaje', atras: '#/personajes', html: `<p class="vacio">No hay ningún personaje a medio crear.</p><button class="btn primario ancho" data-a="crearPJ">Empezar uno</button>` };
   const w = WZ(), p = w.paso;
-  const cuerpo = [wzPasoClase, wzPasoTrasfondo, wzPasoEspecie, wzPasoCaracteristicas, wzPasoAlineamiento, wzPasoDetalles, wzPasoResumen][p]();
+  const cuerpo = [wzPasoClase, wzPasoTrasfondo, wzPasoEspecie, wzPasoCaracteristicas, wzPasoConjuros, wzPasoAlineamiento, wzPasoDetalles, wzPasoResumen][p]();
   const html = `<p class="wz-paso">Paso ${p + 1} de ${WZ_PASOS.length} · ${WZ_PASOS[p]}</p>
     <div class="wz-prog">${WZ_PASOS.map((n, i) => `<button class="${i < p ? 'hecho' : i === p ? 'actual' : ''}" data-a="wzIr" data-n="${i}" aria-label="Paso ${i + 1}: ${n}" ${i > p ? 'disabled' : ''}></button>`).join('')}</div>
     ${cuerpo}`;
@@ -2464,10 +2604,11 @@ A.crearPJ = async () => {
 A.wzSet = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v;
   if (w[k] === v && (k === 'habEspecie' || k === 'doteHumano')) w[k] = null; else w[k] = v;
-  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; }
-  if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; }
-  if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; }
-  if (k === 'doteHumano') w.habDote = [];
+  w.magia ||= {};
+  if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.conj = {}; }
+  if (k === 'trasfondo') { w.equipoTras = 'A'; w.bonus2 = w.bonus1 = null; delete w.magia.trasfondo; }
+  if (k === 'especie') { w.linaje = w.tamano = w.aptitud = w.habEspecie = w.doteHumano = null; w.habDote = []; delete w.magia.especie; }
+  if (k === 'doteHumano') { w.habDote = []; delete w.magia.especie; }
   wzPintar(false);
   if (['clase', 'trasfondo', 'especie'].includes(k)) { const d = $('#wz-detalle'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 };
@@ -2516,6 +2657,8 @@ A.wzCrear = () => {
     `Tamaño ${h.tamano} · Velocidad ${String(h.velocidad).replace('.', ',')} m${h.vision ? ` · Visión en la oscuridad ${h.vision} m` : ''}`,
     `Habilidades: ${comp.join(', ')}`,
     `Dotes: ${h.dotes.map(d => d.nombre).join(', ')}`,
+    ...h.magia.map(m => `Iniciado en la magia: lista de ${LISTAS_MAGIA.find(x => x[0] === m.lista)[1].toLowerCase()}, aptitud ${CAR_NOMBRE[m.apt]}`),
+    w.aptitud && `Aptitud mágica del linaje: ${CAR_NOMBRE[w.aptitud]}`,
     `Herramienta: ${h.t.herramienta}`,
     `Idiomas: ${h.idiomas.join(', ')}`,
     `Equipo: ${h.equipo.join(' + ')}`,
@@ -2525,9 +2668,10 @@ A.wzCrear = () => {
   const pj = {
     id: uid(), nombre: w.nombre.trim(), jugador: w.jugador.trim(), clase: `${h.c.nombre} ${h.e.nombre.toLowerCase()}`, nivel: 1,
     ca: h.ca, pgMax: h.pg, ...h.f, salvComp: h.salv.slice(), iniDes: true, alerta: h.alerta, iniBC: h.alerta, iniExtra: 0,
-    pasiva: h.pasiva, notas,
+    pasiva: h.pasiva, notas, conjuros: h.conjuros.map(c => c.id),
     hoja: { clase: h.c.id, trasfondo: h.t.id, especie: h.e.id, linaje: w.linaje, aptitud: w.aptitud, tamano: h.tamano, alineamiento: w.alineamiento,
       habilidades: comp, dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramienta: h.t.herramienta,
+      conj: JSON.parse(JSON.stringify(w.conj || {})), magia: h.magia.map(m => ({ origen: m.origen, lista: m.lista, apt: m.apt, trucos: m.est.T, conjuros: m.est.C })), conjEspecie: wzConjFijos(),
       tiradas: w.tiradas.map(Number), orden: wzOrden(), bonus: wzBonus(), descripcion: w.descripcion.trim(), personalidad: w.personalidad.trim(), creado: Date.now() }
   };
   E.personajes.push(pj);
