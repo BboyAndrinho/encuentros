@@ -3540,7 +3540,9 @@ VISTAS.subir = id => {
     if (p.auto.length) h += `<h3 class="sub-tit">Gana siempre preparados</h3><p class="nota" style="margin-top:0">Se los da ${[...new Set(p.auto.map(a => ({ terreno: 'su Círculo de la tierra', subclase: 'su subclase (' + esc(c.subclase.nombre) + ')', especie: 'su linaje', clase: 'su clase' })[a.origen]))].join(' y ')}. No cuentan entre los que elige.</p>
       <div class="lista">${p.auto.map(a => { const x = CONJ.get(a.id); return `<div class="fila"><span class="marca-conj on">✓</span><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}</div></div></div>`; }).join('')}</div>`;
     const grupos = suGrupos(pj);
-    for (const g of grupos) h += `<h3 class="sub-tit">${esc(g.titulo)}: elige ${g.nEf} <span class="cuenta">${g.elegidos.length}/${g.nEf}</span></h3>${g.nota ? `<p class="nota" style="margin-top:0">${g.nota}</p>` : ''}${g.nEf < g.n ? `<p class="nota" style="margin-top:0">Ya conoce casi todos los de esta lista: solo quedan ${g.nEf} por elegir.</p>` : ''}
+    for (const g of grupos) h += g.nEf === 0
+      ? `<h3 class="sub-tit">${esc(g.titulo)}</h3><p class="nota" style="margin-top:0">Ya conoce todos los de esta lista (algunos por su especie, dotes u otros rasgos), así que no le queda ninguno nuevo por aprender.</p>`
+      : `<h3 class="sub-tit">${esc(g.titulo)}: elige ${g.nEf} <span class="cuenta">${g.elegidos.length}/${g.nEf}</span></h3>${g.nota ? `<p class="nota" style="margin-top:0">${g.nota}</p>` : ''}${g.nEf < g.n ? `<p class="nota" style="margin-top:0">Ya conoce casi todos los de esta lista: solo quedan ${g.nEf} por elegir.</p>` : ''}
       ${suListaConjNiveles(g.k, g.filtro, g.elegidos, g.nEf, new Set([...g.bloq].filter(i => !g.elegidos.includes(i))), g.abierto)}`;
     if (!grupos.length && !p.auto.length) h += `<p class="nota">En este nivel no aprende trucos ni conjuros nuevos.</p>`;
     h += `<p class="nota">Toca el nombre de un conjuro para leerlo y <b>+</b> para elegirlo.</p>`;

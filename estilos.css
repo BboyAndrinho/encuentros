@@ -163,7 +163,8 @@ body.con-nav #pie { bottom: calc(60px + env(safe-area-inset-bottom)); padding-bo
 .chip {
   display: inline-flex; align-items: center; gap: 4px; min-height: 34px; padding: 4px 10px;
   border-radius: 999px; border: 1px solid var(--borde); background: var(--superficie);
-  color: var(--suave); font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  color: var(--suave); font-size: .85rem; font-weight: 600; cursor: pointer;
+  max-width: 100%; text-align: left; line-height: 1.25; /* los textos largos pasan a otra línea en vez de salirse */
 }
 .chip.on { background: color-mix(in srgb, var(--acento) 22%, var(--superficie)); border-color: var(--acento); color: var(--texto); }
 .chip.fijo { cursor: default; }
@@ -469,9 +470,10 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .srd-tabla th:first-child, .srd-tabla td:first-child { padding-left: 8px; }
 .srd-tabla td { padding: 6px 5px; border-top: 1px solid var(--borde); vertical-align: top; }
 .srd-tabla td:first-child { font-weight: 600; }
-.srd-cars { text-align: center; }
-.srd-cars th, .srd-cars td { text-align: center; padding: 4px 3px; }
-.srd-cars tbody th { font-size: .84rem; color: inherit; background: none; border-top: 1px solid var(--borde); white-space: nowrap; }
+.srd-cars { text-align: center; font-size: .8rem; }
+.srd-cars th, .srd-cars td { text-align: center; padding: 4px 2px; }
+.srd-cars th:first-child, .srd-cars td:first-child { padding-left: 4px; }
+.srd-cars tbody th { font-size: .8rem; color: inherit; background: none; border-top: 1px solid var(--borde); white-space: nowrap; }
 .srd-cars td:first-child { font-weight: inherit; }
 .srd-recuadro { margin: 12px 0; padding: 4px 12px; border-left: 3px solid var(--acento); background: var(--fondo); border-radius: 0 10px 10px 0; }
 .cuerpo ul, .regla-txt ul, .wz-det ul, .wz-op-det ul, .acc-txt ul { margin: 6px 0; padding-left: 20px; }
