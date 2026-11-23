@@ -551,6 +551,42 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .wz-habs div:not(.comp) { color: var(--suave); }
 .wz-habs small { font-weight: 500; opacity: .8; }
 @media (max-width: 360px) { .wz-habs { grid-template-columns: 1fr; } }
+/* ===== Inventario y dinero (hoja del personaje) ===== */
+.monedas { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 6px 0; }
+.moneda { display: flex; flex-direction: column; align-items: center; padding: 8px 2px 6px; border-radius: 12px; border: 1px solid var(--borde); background: var(--superficie); line-height: 1.1; }
+.moneda .v { font-size: 1.15rem; font-weight: 800; }
+.moneda .k { font-size: .78rem; font-weight: 700; text-transform: uppercase; }
+.moneda small { font-size: .66rem; color: var(--suave); }
+.moneda.m-ppt .k { color: #b9c4cf; } .moneda.m-po .k { color: #e3b341; } .moneda.m-pe .k { color: #9fbf6a; }
+.moneda.m-pp .k { color: #c9ced6; } .moneda.m-pc .k { color: #d08a52; }
+.mon-form { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mon-form input, .mon-form select, .inv-nuevo input { min-height: 42px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); font: inherit; min-width: 0; }
+.mon-bot { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.inventario { border: 1px solid var(--borde); border-radius: 12px; background: var(--superficie); margin-top: 6px; }
+.inv-fila { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--borde); }
+.inv-fila:last-child { border-bottom: 0; }
+.inv-txt { flex: 1; min-width: 0; }
+.inv-txt b { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.inv-txt small { display: block; color: var(--suave); font-size: .75rem; }
+.inv-cant { display: flex; align-items: center; gap: 2px; flex: none; }
+.inv-cant span { min-width: 26px; text-align: center; font-weight: 800; }
+.inv-cant .icono { border: 1px solid var(--borde); }
+.inv-nuevo { display: flex; gap: 6px; margin-top: 8px; }
+.inv-nuevo input { flex: 1; }
+.inv-nuevo .btn { flex: none; }
+
+/* Botón «Leer» al lado de cada opción (dotes, invocaciones, metamagia…) */
+.wz-op-caja { position: relative; }
+.wz-op-caja > .wz-op { padding-right: 82px; }
+.wz-leer {
+  position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 10px; border-radius: 999px; border: 1px solid var(--borde); background: var(--fondo);
+  color: var(--texto); font-size: .78rem; font-weight: 700; cursor: pointer;
+}
+.wz-leer .ic { width: 14px; height: 14px; }
+/* En las listas de conjuros, el nombre se toca para leerlo: una flechita lo indica */
+.fila .f-txt[data-a="verConjuro"] { position: relative; padding-right: 22px; cursor: pointer; }
+.fila .f-txt[data-a="verConjuro"]::after { content: "›"; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 1.4rem; color: var(--suave); }
 .wz-op-det { margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--acento) 35%, transparent); font-size: .9rem; line-height: 1.45; font-weight: 400; }
 .wz-op-det p { margin: 4px 0; }
 .wz-rec { color: var(--aviso); }

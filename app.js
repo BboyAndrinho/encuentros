@@ -35,7 +35,9 @@ const IC = {
   espadas: '<path d="M14.5 17.5L3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/><path d="M9.5 17.5L21 6V3h-3L6.5 14.5"/><path d="M11 19l-6-6"/><path d="M8 16l-4 4"/><path d="M5 21l-2-2"/>',
   escudo: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logo: '<path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 2L7 11h10z"/><path d="M7 11l5 11 5-11"/><path d="M3.3 7L7 11M20.7 7L17 11"/>',
-  siguiente: '<path d="M9 18l6-6-6-6"/>'
+  siguiente: '<path d="M9 18l6-6-6-6"/>',
+  libro: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
+  menos: '<path d="M5 12h14"/>'
 };
 const ic = (p, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 
@@ -2218,7 +2220,7 @@ function htmlInvocaciones(nivel, conocidas, elegidas, trucos, op) {
   return `<div class="wz-ops">${(CR.invocaciones || []).map(inv => {
     const on = elegidas.includes(inv.id), ya = conocidas.includes(inv.id) && !inv.repetible;
     const no = ya ? 'ya la conoce' : invocacionValida(inv, nivel, [...conocidas, ...elegidas.filter(x => x !== inv.id)], trucos);
-    return op(inv.id, on, `<b>${esc(inv.nombre)}</b><small>${inv.requisitos ? 'Requisitos: ' + esc(inv.requisitos) : 'Sin requisitos'}${no && !on ? ` · <span class="no">${esc(no)}</span>` : ''}</small>${on ? `<div class="wz-op-det">${inv.html}</div>` : ''}`, !!no && !on);
+    return conLeer(op(inv.id, on, `<b>${esc(inv.nombre)}</b><small>${inv.requisitos ? 'Requisitos: ' + esc(inv.requisitos) : 'Sin requisitos'}${no && !on ? ` · <span class="no">${esc(no)}</span>` : ''}</small>${on ? `<div class="wz-op-det">${inv.html}</div>` : ''}`, !!no && !on), 'invoc', inv.id);
   }).join('')}</div>`;
 }
 // Orden divina (clérigo) y Orden primigenia (druida)
@@ -2300,6 +2302,143 @@ function equipoPJ(pj) {
   h.caExtra = pj.ca == null || fallo ? 0 : pj.ca - calc.total;
   return h;
 }
+
+// ===== Inventario y dinero =====
+// Monedas del SRD (valor en piezas de cobre): 1 pe = 5 pp, 1 po = 10 pp, 1 ppt = 10 po
+const MONEDAS = [['ppt', 'Platino', 1000], ['po', 'Oro', 100], ['pe', 'Electro', 50], ['pp', 'Plata', 10], ['pc', 'Cobre', 1]];
+const VALOR_MONEDA = Object.fromEntries(MONEDAS.map(([k, , v]) => [k, v]));
+// Contenido de los paquetes de equipo (SRD 5.2.1, págs. 106-107)
+const PAQUETES = {
+  'paquete de artista': 'campana, cantimplora, 3 disfraces, espejo, 8 frascos de aceite, linterna de ojo de buey, mochila, petate, raciones para 9 días, yesquero',
+  'paquete de diplomatico': 'cofre, 2 estuches para mapas o pergaminos, 4 frascos de aceite, 5 hojas de papel, 5 hojas de pergamino, lámpara, perfume, 5 plumas, ropas de calidad, tinta, yesquero',
+  'paquete de erudito': '10 frascos de aceite, 10 hojas de pergamino, lámpara, libro, mochila, pluma, tinta, yesquero',
+  'paquete de explorador': '10 antorchas, cantimplora, cuerda, 2 frascos de aceite, mochila, petate, raciones para 10 días, yesquero',
+  'paquete de explorador de mazmorras': 'abrojos, 10 antorchas, cantimplora, cuerda, 2 frascos de aceite, mochila, palanqueta, raciones para 10 días, yesquero',
+  'paquete de ladron': 'bolas de metal, campana, cantimplora, cuerda, 7 frascos de aceite, linterna sorda, mochila, palanqueta, raciones para 5 días, 10 velas, yesquero',
+  'paquete de sacerdote': 'agua bendita, lámpara, manta, mochila, raciones para 7 días, túnica, yesquero'
+};
+const mayus = s => s.charAt(0).toUpperCase() + s.slice(1);
+// Parte «hacha a dos manos, 4 hachas de mano, paquete de explorador y 15 po» en trozos (respeta los paréntesis)
+function trocearEquipo(txt) {
+  const out = []; let cur = '', prof = 0;
+  const t = String(txt || '').replace(/^\s*(elige [abc](?:,? [abc])* o [abc]:\s*)?/i, '').replace(/^\([A-C]\)\s*/, '');
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (ch === '(') prof++; else if (ch === ')') prof--;
+    if (!prof && ch === ',') { out.push(cur); cur = ''; continue; }
+    if (!prof && t.slice(i, i + 3) === ' y ' && /^[\s\d\p{L}]/u.test(t[i + 3] || '')) { out.push(cur); cur = ''; i += 2; continue; }
+    if (!prof && t.slice(i, i + 3) === ' o ' && /^\s*\(?[A-C]\)/.test(t.slice(i + 3))) { out.push(cur); cur = ''; i += 2; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map(s => s.trim().replace(/\.$/, '')).filter(Boolean);
+}
+// Convierte el texto del equipo en objetos del inventario y monedas.
+// elegidas: herramientas elegidas al crear (para «instrumento musical de tu elección», «juego (el mismo que arriba)»…)
+function equipoAInventario(textos, elegidas = []) {
+  const items = [], monedas = { ppt: 0, po: 0, pe: 0, pp: 0, pc: 0 };
+  const grupo = g => { const n = elegidaDe(g); return n && mayus(n.replace(/^(instrumento musical|juego):\s*/i, '')); };
+  const elegidaDe = g => elegidas.find(n => { const x = HERR().find(h => norm(h.nombre) === norm(n)); return x && (g === 'artesano' ? x.categoria === 'artesano' || x.grupo === 'Instrumento musical' : x.grupo === g); });
+  const anadir = (nombre, c, de) => {
+    const ya = items.find(x => norm(x.n) === norm(nombre));
+    if (ya) ya.c += c; else items.push({ id: uid(), n: mayus(nombre), c, de });
+  };
+  for (const [txt, de] of textos) for (let p of trocearEquipo(txt)) {
+    const mon = p.match(/^(\d+)\s*(ppt|po|pe|pp|pc)$/i);
+    if (mon) { monedas[mon[2].toLowerCase()] += +mon[1]; continue; }
+    let c = 1; const mc = p.match(/^(\d+)\s+(.+)$/); if (mc) { c = +mc[1]; p = mc[2]; }
+    // Cosas que se gastan de una en una: raciones por días, hojas de pergamino
+    const mr = p.match(/^raciones para (\d+) dias?$/i) || norm(p).match(/^raciones para (\d+) dias?$/);
+    if (mr) { c *= +mr[1]; p = 'raciones (1 día)'; }
+    const mh = norm(p).match(/^pergamino \((\d+) hojas\)$/);
+    if (mh) { c *= +mh[1]; p = 'hojas de pergamino'; }
+    const np = norm(p);
+    if (/instrumento musical de tu eleccion/.test(np)) p = grupo('Instrumento musical') || 'Instrumento musical';
+    else if (/herramientas de artesano o instrumento musical/.test(np)) p = grupo('artesano') || 'Herramientas de artesano o instrumento musical';
+    else if (/^juego \(el mismo/.test(np)) p = grupo('Juego') || 'Juego';
+    if (PAQUETES[np]) {
+      for (let q of trocearEquipo(PAQUETES[np])) {
+        let k = 1; const m2 = q.match(/^(\d+)\s+(.+)$/); if (m2) { k = +m2[1]; q = m2[2]; }
+        const r2 = norm(q).match(/^raciones para (\d+) dias?$/); if (r2) { k *= +r2[1]; q = 'raciones (1 día)'; }
+        anadir(q, k * c, mayus(p));
+      }
+      continue;
+    }
+    anadir(p, c, de);
+  }
+  return { items, monedas };
+}
+// Personajes sin inventario: se crea a partir del equipo que tenían apuntado
+function inventarioPJ(pj) {
+  const h = equipoPJ(pj); if (!h) return null;
+  if (!h.inventario) {
+    const lineas = String(h.equipoActual ?? (h.equipo || []).join('\n')).split('\n').map(s => s.trim()).filter(Boolean);
+    const r = equipoAInventario(lineas.map(l => [l, '']), h.herramientas || []);
+    h.inventario = r.items; h.monedas = r.monedas;
+  }
+  h.monedas ||= { ppt: 0, po: 0, pe: 0, pp: 0, pc: 0 };
+  return h;
+}
+const totalMonedas = m => MONEDAS.reduce((s, [k, , v]) => s + (m[k] || 0) * v, 0);
+// Paga «cant» monedas del tipo «tipo». Usa primero ese tipo; si no llega, las de menos valor y, si hace falta,
+// rompe monedas de más valor y devuelve el cambio. Devuelve false si no le llega el dinero.
+function pagarMonedas(m, cant, tipo) {
+  let resto = cant * VALOR_MONEDA[tipo];
+  if (totalMonedas(m) < resto) return false;
+  const usar = (k, max) => { const n = Math.min(m[k] || 0, max); m[k] -= n; resto -= n * VALOR_MONEDA[k]; };
+  usar(tipo, Math.floor(resto / VALOR_MONEDA[tipo]));
+  for (const [k, , v] of MONEDAS) if (v < VALOR_MONEDA[tipo] && resto > 0) usar(k, Math.floor(resto / v));
+  for (const [k, , v] of [...MONEDAS].reverse()) while (resto > 0 && v > 1 && (m[k] || 0) > 0 && (v >= VALOR_MONEDA[tipo] || v > resto)) { m[k]--; resto -= v; }
+  for (const [k, , v] of [...MONEDAS].reverse()) while (resto > 0 && (m[k] || 0) > 0) { m[k]--; resto -= v; }
+  // Cambio: en oro, plata y cobre (como se da el cambio normalmente; electro solo si se pagaba en electro)
+  let cambio = -resto;
+  for (const [k, , v] of MONEDAS) if (k !== 'ppt' && (k !== 'pe' || tipo === 'pe') && cambio >= v) { const n = Math.floor(cambio / v); m[k] = (m[k] || 0) + n; cambio -= n * v; }
+  return true;
+}
+function htmlInventario(pj) {
+  const h = inventarioPJ(pj), m = h.monedas;
+  const filas = h.inventario.map(it => `<div class="inv-fila">
+      <div class="inv-txt"><b>${esc(it.n)}</b>${it.de ? `<small>${esc(it.de)}</small>` : ''}</div>
+      <div class="inv-cant"><button class="icono peq" data-a="invCant" data-id="${pj.id}" data-it="${it.id}" data-d="-1" aria-label="Uno menos de ${esc(it.n)}">${ic(IC.menos)}</button><span>${it.c}</span><button class="icono peq" data-a="invCant" data-id="${pj.id}" data-it="${it.id}" data-d="1" aria-label="Uno más de ${esc(it.n)}">${ic(IC.mas)}</button></div>
+    </div>`).join('');
+  return `<h3 class="sub-tit">Dinero <small class="nv">${fmtMonedas(m) || 'sin monedas'}</small></h3>
+    <div class="monedas">${MONEDAS.map(([k, nom]) => `<div class="moneda m-${k}"><span class="v">${m[k] || 0}</span><span class="k">${k}</span><small>${nom}</small></div>`).join('')}</div>
+    <div class="mon-form">
+      <input type="number" inputmode="numeric" min="1" step="1" id="mon-cant-${pj.id}" placeholder="Cantidad" aria-label="Cantidad de monedas">
+      <select id="mon-tipo-${pj.id}" aria-label="Tipo de moneda">${MONEDAS.map(([k, nom]) => `<option value="${k}" ${k === 'po' ? 'selected' : ''}>${k} · ${nom}</option>`).join('')}</select>
+      <div class="mon-bot"><button class="btn" data-a="monedas" data-id="${pj.id}" data-d="1">${ic(IC.mas)} Añadir</button><button class="btn" data-a="monedas" data-id="${pj.id}" data-d="-1">${ic(IC.menos)} Quitar</button></div>
+    </div>
+    <p class="nota" style="margin-top:4px">1 po = 10 pp = 100 pc · 1 pe = 5 pp · 1 ppt = 10 po. Si al quitar no tiene bastantes monedas de ese tipo, paga con otras y recibe el cambio.</p>
+    <h3 class="sub-tit">Objetos <small class="nv">${h.inventario.length}</small></h3>
+    <div class="inventario">${filas || '<p class="vacio">No lleva nada.</p>'}</div>
+    <div class="inv-nuevo"><input type="text" id="inv-nuevo-${pj.id}" placeholder="Añadir objeto (por ejemplo: Poción de curación)" aria-label="Nombre del objeto nuevo"><button class="btn primario" data-a="invNuevo" data-id="${pj.id}">${ic(IC.mas)} Añadir</button></div>
+    <p class="nota" style="margin-top:4px">Con <b>−</b> a 0 el objeto desaparece de la lista.</p>`;
+}
+const fmtMonedas = m => MONEDAS.filter(([k]) => m[k]).map(([k]) => `${m[k]} ${k}`).join(', ');
+A.invCant = el => {
+  const pj = pjPorId(el.dataset.id), h = pj && inventarioPJ(pj); if (!h) return;
+  const it = h.inventario.find(x => x.id === el.dataset.it); if (!it) return;
+  it.c += +el.dataset.d;
+  if (it.c <= 0) { h.inventario = h.inventario.filter(x => x !== it); toast(`${it.n}: quitado del inventario`); }
+  guardar(); refrescar();
+};
+A.invNuevo = el => {
+  const pj = pjPorId(el.dataset.id), h = pj && inventarioPJ(pj), inp = $('#inv-nuevo-' + el.dataset.id); if (!h || !inp) return;
+  const txt = inp.value.trim(); if (!txt) { inp.focus(); return; }
+  let c = 1, n = txt; const m = txt.match(/^(\d+)\s*(?:x\s*)?(.+)$/i); if (m) { c = +m[1]; n = m[2]; }
+  const ya = h.inventario.find(x => norm(x.n) === norm(n));
+  if (ya) ya.c += c; else h.inventario.push({ id: uid(), n: mayus(n), c, de: '' });
+  guardar(); refrescar(); toast(`Añadido: ${c > 1 ? c + ' × ' : ''}${mayus(n)}`);
+};
+A.monedas = el => {
+  const pj = pjPorId(el.dataset.id), h = pj && inventarioPJ(pj); if (!h) return;
+  const cant = Math.floor(+($('#mon-cant-' + pj.id) || {}).value || 0), tipo = ($('#mon-tipo-' + pj.id) || {}).value || 'po';
+  if (!(cant > 0)) { toast('Escribe cuántas monedas'); const i = $('#mon-cant-' + pj.id); if (i) i.focus(); return; }
+  if (+el.dataset.d > 0) { h.monedas[tipo] = (h.monedas[tipo] || 0) + cant; toast(`+${cant} ${tipo}`); }
+  else if (!pagarMonedas(h.monedas, cant, tipo)) { toast(`No le llega: tiene ${fmtMonedas(h.monedas) || '0 monedas'}`); return; }
+  else toast(`−${cant} ${tipo}`);
+  guardar(); refrescar();
+};
 // CA con lo que lleva puesto. o.cars / o.n / o.dotes permiten calcularla con otras puntuaciones, nivel o dotes (subida de nivel)
 function caPJ(pj, o = {}) {
   const h = pj.hoja, c = clasePJ(pj) || {}, cars = o.cars || pj, n = o.n || pj.nivel || 1;
@@ -2533,6 +2672,20 @@ function wzFalta(p) {
   if (p === 6) { if (!w.nombre.trim()) return 'Escribe el nombre del personaje'; if (w.idiomas.length !== 2) return 'Elige 2 idiomas además del común'; }
   return '';
 }
+// Opción con un botón «Leer» al lado: abre la descripción completa sin elegirla (también si no se puede elegir)
+const conLeer = (boton, tipo, id) => `<div class="wz-op-caja">${boton}<button class="wz-leer" data-a="leerInfo" data-t="${tipo}" data-id="${esc(id)}" aria-label="Leer la descripción completa">${ic(IC.libro)}Leer</button></div>`;
+function infoOpcion(t, id) {
+  if (t === 'dote') { const d = CR.dotes.find(x => x.id === id); return d && { titulo: d.nombre, sub: [d.categoriaTexto, d.requisitos ? 'Requisitos: ' + d.requisitos : ''].filter(Boolean).join(' · '), html: d.html }; }
+  if (t === 'invoc') { const d = (CR.invocaciones || []).find(x => x.id === id); return d && { titulo: d.nombre, sub: d.requisitos ? 'Requisitos: ' + d.requisitos : 'Sin requisitos', html: d.html }; }
+  if (t === 'meta') { const d = (CR.metamagia || []).find(x => x.id === id); return d && { titulo: d.nombre, sub: 'Coste: ' + d.coste, html: d.html }; }
+  if (t === 'orden') { const [cid, nom] = id.split('|'); const c = CR.clases.find(x => x.id === cid); return c && { titulo: nom, sub: ORDENES[cid].rasgo, html: detalleOrden(c, nom) }; }
+  if (t === 'linaje') { const [eid, oid] = id.split('|'); const e = CR.especies.find(x => x.id === eid), o = e && e.linaje.opciones.find(x => x.id === oid); return o && { titulo: o.nombre, sub: e.nombre, html: detalleLinaje(e, o) }; }
+  return null;
+}
+A.leerInfo = el => {
+  const i = infoOpcion(el.dataset.t, el.dataset.id); if (!i) return;
+  abrirHoja(() => `<div class="hp-cab"><div><h3>${esc(i.titulo)}</h3>${i.sub ? `<div class="sub">${esc(i.sub)}</div>` : ''}</div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div><div class="regla-txt">${enlazarConjuros(i.html)}</div>`, { fija: true });
+};
 const wzOp = (accion, k, v, on, titulo, sub) => `<button class="wz-op${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}"><b>${esc(titulo)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
 const wzChip = (accion, k, v, on, txt, deshab) => `<button class="chip${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}" ${deshab ? 'disabled' : ''}>${esc(txt)}</button>`;
 const wzRasgos = (lista, k) => lista.map((r, i) => `<details class="regla" data-k="${k}-${i}"><summary>${esc(r.nombre)}</summary><div class="cuerpo">${r.html}</div></details>`).join('');
@@ -2549,13 +2702,13 @@ function wzPasoClase() {
       <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>
       ${(() => { const eh = eleccionHerr(c.herramientas); return eh ? `<h3 class="sub-tit">Herramientas: ${eh.txt.toLowerCase()} <span class="cuenta">${(w.herrClase || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrClase', eh.filtro, w.herrClase || [], () => false)}` : ''; })()}
       ${htmlAvisoHerr()}
-      ${ORDENES[c.id] ? `<h3 class="sub-tit">${ORDENES[c.id].rasgo}</h3><p class="nota" style="margin-top:0">Elige una de las dos funciones. Toca una para leerla entera.</p>
-        <div class="wz-ops">${ORDENES[c.id].ops.map(([id, nom, res]) => { const on = w.ordenClase === id; return `<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="ordenClase" data-v="${id}" aria-pressed="${on}"><b>${nom}</b><small>${res}</small>${on ? `<div class="wz-op-det">${detalleOrden(c, nom)}</div>` : ''}</button>`; }).join('')}</div>` : ''}
+      ${ORDENES[c.id] ? `<h3 class="sub-tit">${ORDENES[c.id].rasgo}</h3><p class="nota" style="margin-top:0">Elige una de las dos funciones. Toca <b>Leer</b> para ver su texto completo.</p>
+        <div class="wz-ops">${ORDENES[c.id].ops.map(([id, nom, res]) => { const on = w.ordenClase === id; return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="ordenClase" data-v="${id}" aria-pressed="${on}"><b>${nom}</b><small>${res}</small>${on ? `<div class="wz-op-det">${detalleOrden(c, nom)}</div>` : ''}</button>`, 'orden', c.id + '|' + nom); }).join('')}</div>` : ''}
       ${nMaestria(c.id, 1) ? `<h3 class="sub-tit">Maestría con armas: elige ${nMaestria(c.id, 1)} tipos de armas <span class="cuenta">${(w.maestria || []).length}/${nMaestria(c.id, 1)}</span></h3>
         <p class="nota" style="margin-top:0">Con esas armas podrá usar su propiedad de maestría (aparece junto al nombre). Tras un descanso largo puede cambiar una.</p>
         ${htmlMaestria(c.id, w.maestria || [], [], (v, on, txt, des) => `<button class="chip${on ? ' on' : ''}" data-a="wzLista" data-k="maestria" data-v="${esc(v)}" data-max="${nMaestria(c.id, 1)}" ${des ? 'disabled' : ''}>${esc(txt)}</button>`)}` : ''}
       ${c.id === 'brujo' ? `<h3 class="sub-tit">Invocación sobrenatural: elige 1 <span class="cuenta">${(w.invoc || []).length}/1</span></h3>
-        <p class="nota" style="margin-top:0">El SRD pone de ejemplo el Pacto del grimorio. A nivel 1 solo puede elegir las que no piden nivel ni otros requisitos. Toca una para leerla.</p>
+        <p class="nota" style="margin-top:0">El SRD pone de ejemplo el Pacto del grimorio. A nivel 1 solo puede elegir las que no piden nivel ni otros requisitos. Toca <b>Leer</b> en cualquiera para ver su texto completo.</p>
         ${htmlInvocaciones(1, [], w.invoc || [], [], (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="wzLista" data-k="invoc" data-v="${v}" data-max="1" ${des ? 'disabled' : ''}>${inner}</button>`)}` : ''}
       <h3 class="sub-tit">Equipo inicial</h3>
       <div class="wz-ops">${Object.entries(c.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoClase', k, w.equipoClase === k, 'Opción ' + k, esc(v))).join('')}</div>
@@ -2593,10 +2746,10 @@ function wzPasoEspecie() {
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(e.nombre)}</h2>`;
     if (e.linaje) {
       const l = e.linaje;
-      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><p class="nota" style="margin-top:0">Toca uno para elegirlo y leer lo que da.</p>
+      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><p class="nota" style="margin-top:0">Toca uno para elegirlo, o <b>Leer</b> para ver lo que da sin elegirlo.</p>
         <div class="wz-ops">${l.opciones.map(o => {
           const on = o.id === w.linaje;
-          return `<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="linaje" data-v="${o.id}" aria-pressed="${on}" aria-expanded="${on}"><b>${esc(o.nombre)}</b><small>${esc(RESUMEN_LINAJE[o.id] || '')}</small>${on ? `<div class="wz-op-det">${detalleLinaje(e, o)}</div>` : ''}</button>`;
+          return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="linaje" data-v="${o.id}" aria-pressed="${on}" aria-expanded="${on}"><b>${esc(o.nombre)}</b><small>${esc(RESUMEN_LINAJE[o.id] || '')}</small>${on ? `<div class="wz-op-det">${detalleLinaje(e, o)}</div>` : ''}</button>`, 'linaje', e.id + '|' + o.id);
         }).join('')}</div>`;
       if (l.aptitud) html += `<h3 class="sub-tit">Aptitud mágica del linaje</h3><div class="seg">${['int', 'sab', 'car'].map(k => `<button class="opc ${w.aptitud === k ? 'on' : ''}" data-a="wzSet" data-k="aptitud" data-v="${k}">${CAR_NOMBRE[k]}</button>`).join('')}</div>`;
     }
@@ -2607,7 +2760,7 @@ function wzPasoEspecie() {
       html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre) && w.habEspecie !== h.nombre)).join('')}</div>
         <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => {
           const deTras = wzTras() && wzTras().doteId === d.id, no = deTras && !d.repetible;
-          return `<button class="wz-op${w.doteHumano === d.id ? ' on' : ''}" data-a="wzSet" data-k="doteHumano" data-v="${d.id}" aria-pressed="${w.doteHumano === d.id}" ${no && w.doteHumano !== d.id ? 'disabled' : ''}><b>${esc(d.nombre)}${d.id === 'habilidoso' ? ' (recomendada)' : ''}</b>${deTras ? `<small>${no ? 'Ya la da su trasfondo: no se puede tener dos veces' : 'Ya la da su trasfondo: se puede repetir con otra lista de conjuros'}</small>` : ''}</button>`; }).join('')}</div>`;
+          return conLeer(`<button class="wz-op${w.doteHumano === d.id ? ' on' : ''}" data-a="wzSet" data-k="doteHumano" data-v="${d.id}" aria-pressed="${w.doteHumano === d.id}" ${no && w.doteHumano !== d.id ? 'disabled' : ''}><b>${esc(d.nombre)}${d.id === 'habilidoso' ? ' (recomendada)' : ''}</b>${deTras ? `<small>${no ? 'Ya la da su trasfondo: no se puede tener dos veces' : 'Ya la da su trasfondo: se puede repetir con otra lista de conjuros'}</small>` : ''}</button>`, 'dote', d.id); }).join('')}</div>`;
       if (w.doteHumano === 'habilidoso') {
         const herrD = w.herrDote || [], total = w.habDote.length + herrD.length;
         const yaHerr = wzHerramientas(), ocupadaH = n => yaHerr.has(norm(n)) && yaHerr.get(norm(n)).origen !== 'dote';
@@ -2747,7 +2900,7 @@ function htmlEstilo1() {
   const w = WZ(), sel = CR.dotes.find(d => d.id === w.estilo);
   return `<div class="reglas-box"><div class="reglas-tit">Estilo de combate · rasgo de guerrero de nivel 1</div>
       <p style="margin:4px 0">Elige una dote de estilo de combate. El SRD recomienda <b>Defensa</b>. Cada vez que suba de nivel de guerrero puede cambiarla por otra.</p></div>
-    <div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'estilo-de-combate').map(d => wzOp('wzSet', 'estilo', d.id, w.estilo === d.id, d.nombre + (d.id === 'defensa' ? ' ★' : ''), '')).join('')}</div>
+    <div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'estilo-de-combate').map(d => conLeer(wzOp('wzSet', 'estilo', d.id, w.estilo === d.id, d.nombre + (d.id === 'defensa' ? ' ★' : ''), ''), 'dote', d.id)).join('')}</div>
     ${sel ? `<div class="wz-det">${sel.html}</div>` : ''}`;
 }
 function wzPasoPericiaConjuros() {
@@ -3010,13 +3163,15 @@ A.wzCrear = () => {
     w.descripcion.trim() && `Descripción: ${w.descripcion.trim()}`,
     w.personalidad.trim() && `Personalidad e historia: ${w.personalidad.trim()}`
   ].filter(Boolean).join('\n');
+  // Inventario: cada objeto del equipo inicial en su línea (los paquetes, abiertos) y las monedas aparte
+  const inv = equipoAInventario([[h.c.equipoOpciones[w.equipoClase], h.c.nombre], [h.t.equipoOpciones[w.equipoTras], h.t.nombre]].filter(x => x[0]), [...(w.herrClase || []), ...(w.herrTras || [])]);
   const pj = {
     id: uid(), nombre: w.nombre.trim(), jugador: w.jugador.trim(), clase: `${h.c.nombre} ${h.e.nombre.toLowerCase()}`, nivel: 1,
     ca: h.ca, pgMax: h.pg, ...h.f, salvComp: h.salv.slice(), iniDes: true, alerta: h.alerta, iniBC: h.alerta, iniExtra: 0,
     pasiva: h.pasiva, notas, conjuros: h.conjuros.map(c => c.id),
     hoja: { clase: h.c.id, trasfondo: h.t.id, especie: h.e.id, linaje: w.linaje, aptitud: w.aptitud, tamano: h.tamano, alineamiento: w.alineamiento,
       ordenClase: w.ordenClase || null, maestria: (w.maestria || []).slice(), invocaciones: (w.invoc || []).slice(), armaduras: h.armaduras, armas: h.armas,
-      armadura: h.armadura, escudo: h.escudo, armaduraMago: false, caExtra: 0, equipoActual: h.equipo.join('\n'), grimorio: [...((w.conj || {}).grimT || []), ...((w.conj || {}).grimR || [])],
+      armadura: h.armadura, escudo: h.escudo, armaduraMago: false, caExtra: 0, equipoActual: h.equipo.join('\n'), inventario: inv.items, monedas: inv.monedas, grimorio: [...((w.conj || {}).grimT || []), ...((w.conj || {}).grimR || [])],
       habilidades: comp, pericia: h.habilidades.filter(x => x.pericia).map(x => x.nombre), dotes: h.dotes, idiomas: h.idiomas, equipo: h.equipo, herramientas: h.herramientas,
       conj: JSON.parse(JSON.stringify(w.conj || {})), magia: h.magia.map(m => ({ origen: m.origen, lista: m.lista, apt: m.apt, trucos: m.est.T, conjuros: m.est.C })), conjEspecie: wzConjFijos(), conjSiempre: wzConjClaseFijos(),
       tiradas: w.tiradas.map(Number), orden: wzOrden(), bonus: wzBonus(), descripcion: w.descripcion.trim(), personalidad: w.personalidad.trim(), creado: Date.now() }
@@ -3124,8 +3279,9 @@ VISTAS.hoja = id => {
       <div class="seg">${Object.entries(TERRENOS_DRUIDA).map(([k, x]) => `<button class="opc ${h.terreno === k ? 'on' : ''}" data-a="hojaTerreno" data-id="${pj.id}" data-v="${k}">${x.nombre}</button>`).join('')}</div>` : ''}
     ${conj.length ? `<h3 class="sub-tit">Conjuros</h3><div class="lista">${conj.map(x => { const marca = [(h.conjSiempre || []).includes(x.id) && 'siempre preparado', (h.arcanum || []).includes(x.id) && 'arcanum místico', (h.maestriaConj || []).includes(x.id) && 'maestría sobre conjuros', (h.caracteristicos || []).includes(x.id) && 'característico'].filter(Boolean);
       return `<div class="fila"><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}${marca.length ? ' · <b>' + marca.join(', ') + '</b>' : ''}</div></div></div>`; }).join('')}</div>` : ''}
-    <h3 class="sub-tit">Equipo y personaje</h3>
-    <label class="campo"><span>Equipo que lleva ahora (escríbelo y cámbialo cuando quieras)</span><textarea data-in="hojaEquipo" data-id="${pj.id}" rows="5">${esc(h.equipoActual ?? (h.equipo || []).join('\n'))}</textarea></label>
+    <h3 class="sub-tit" id="inventario" style="font-size:1.05rem;margin-top:20px">Inventario</h3>
+    ${htmlInventario(pj)}
+    <h3 class="sub-tit">Personaje</h3>
     <div class="wz-det">${fila('Equipo inicial', esc((h.equipo || []).join(' + ')))}${fila('Descripción', esc(h.descripcion))}${fila('Personalidad e historia', esc(h.personalidad))}</div>
     ${(h.niveles || []).length ? `<h3 class="sub-tit">Historial de niveles</h3><div class="wz-det">${h.niveles.map(x => `<p><b>Nivel ${x.nivel}:</b> ${esc(x.resumen)}</p>`).join('')}</div>` : ''}`;
   return {
@@ -3342,7 +3498,7 @@ function htmlElegirDote(pj, s, r, filtro, cars) {
   const cats = [['origen', 'De origen'], ['generales', 'Generales'], ['estilo-de-combate', 'De estilo de combate'], ['don-epico', 'Dones épicos']];
   return cats.map(([cat, tit]) => { const l = ops.filter(d => d.categoria === cat); if (!l.length) return '';
     return `<p class="wz-grupo-herr">${tit}</p><div class="wz-ops">${l.map(d => { const ok = cumpleReq(d, p.c, p.n, cars); const on = r.dote === d.id;
-      return `<button class="wz-op${on ? ' on' : ''}" data-a="suSet" data-s="${s}" data-k="dote" data-v="${d.id}" ${ok ? '' : 'disabled'}><b>${esc(d.nombre)}</b>${d.requisitos ? `<small>Requisitos: ${esc(d.requisitos)}${ok ? '' : ' (no los cumple)'}</small>` : ''}</button>${on ? htmlExtrasDote(pj, s, r, cars) : ''}`; }).join('')}</div>`; }).join('');
+      return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="suSet" data-s="${s}" data-k="dote" data-v="${d.id}" ${ok ? '' : 'disabled'}><b>${esc(d.nombre)}</b>${d.requisitos ? `<small>Requisitos: ${esc(d.requisitos)}${ok ? '' : ' (no los cumple)'}</small>` : ''}</button>`, 'dote', d.id) + (on ? htmlExtrasDote(pj, s, r, cars) : ''); }).join('')}</div>`; }).join('');
 }
 // Habilidades en las que puede ganar pericia ahora (competente y sin pericia; el mago, solo las de Académico)
 function opcionesPericia(pj, p) {
@@ -3516,9 +3672,9 @@ VISTAS.subir = id => {
   }
   if (tot.meta) {
     const ya = pj.hoja.metamagia || []; s.nMeta ||= [];
-    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${tot.meta === 1 ? '1 opción' : tot.meta + ' opciones'} de metamagia${q.meta.length ? ` (${q.meta.length === tot.meta ? 'por la que quita' : 'incluye 1 por la que quita'})` : ''} <span class="cuenta">${s.nMeta.length}/${tot.meta}</span>. Cada una cuesta puntos de hechicería. Toca una para leerla.</p>
+    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${tot.meta === 1 ? '1 opción' : tot.meta + ' opciones'} de metamagia${q.meta.length ? ` (${q.meta.length === tot.meta ? 'por la que quita' : 'incluye 1 por la que quita'})` : ''} <span class="cuenta">${s.nMeta.length}/${tot.meta}</span>. Cada una cuesta puntos de hechicería. Toca <b>Leer</b> para ver su texto completo.</p>
       <div class="wz-ops">${(CR.metamagia || []).map(m => { const on = s.nMeta.includes(m.id), des = !on && ya.includes(m.id);
-        return `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${tot.meta}" ${des ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}</small>${on ? `<div class="wz-op-det">${m.html}</div>` : ''}</button>`; }).join('')}</div>`);
+        return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${tot.meta}" ${des ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}</small>${on ? `<div class="wz-op-det">${m.html}</div>` : ''}</button>`, 'meta', m.id); }).join('')}</div>`);
   }
   if (p.idiomas) {
     const sabe = new Set((pj.hoja.idiomas || []).map(norm));
@@ -3530,7 +3686,7 @@ VISTAS.subir = id => {
     + htmlMaestria(c.id, s.nMaestria, pj.hoja.maestria || [], (v, on, txt, des) => suChip('', 'nMaestria', v, on, txt, tot.maestria, des)));
   if (tot.invoc) {
     const trucos = [...quedan(pj.conjuros, 'trucos'), ...s.nTrucos];
-    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Toca una para leerla.</p>`
+    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Toca <b>Leer</b> para ver el texto completo de cualquiera.</p>`
       + htmlInvocaciones(p.n, quedan(pj.hoja.invocaciones, 'invoc'), s.nInvoc, trucos, (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${tot.invoc}" ${des ? 'disabled' : ''}>${inner}</button>`));
   }
   const tipo = tipoLanzador(c.nombre);
