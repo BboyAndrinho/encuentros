@@ -412,6 +412,22 @@ details.accion > summary { padding: 8px 10px; cursor: pointer; list-style: none;
 .resumen-combate p { margin: 4px 0; font-size: .9rem; }
 .resumen-combate ul { margin: 4px 0; padding-left: 18px; font-size: .9rem; }
 
+/* ===== Espacios, recursos y usos limitados ===== */
+.rec-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 0; border-bottom: 1px solid var(--borde); }
+.rec-fila:last-of-type { border-bottom: 0; }
+.rec-nom { flex: 1 1 140px; min-width: 0; font-weight: 700; font-size: .92rem; }
+.rec-nom small { display: block; font-weight: 500; color: var(--suave); font-size: .76rem; }
+.rec-max { display: inline-flex; align-items: center; gap: 2px; }
+.rec-max b { min-width: 20px; text-align: center; }
+.bolas { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.bola { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--pj); background: transparent; cursor: pointer; padding: 0; }
+.bola.on { background: var(--pj); }
+.fila-anadir { display: flex; gap: 8px; margin: 10px 0; }
+.fila-anadir input { flex: 1; min-height: 40px; padding: 6px 12px; border-radius: 10px; border: 1px solid var(--borde); background: var(--superficie); }
+.lanzar { margin: 6px 0 12px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--pj) 12%, var(--superficie)); border: 1px solid color-mix(in srgb, var(--pj) 40%, transparent); }
+.lanzar .botonera { margin: 8px 0 4px; }
+.lanzar small { font-weight: 500; opacity: .8; }
+
 /* ===== Reglas de estados ===== */
 details.regla { background: var(--superficie); border: 1px solid var(--borde); border-radius: 14px; margin: 8px 0; }
 details.regla summary { padding: 14px 16px; font-weight: 700; cursor: pointer; list-style: none; display: flex; justify-content: space-between; }
