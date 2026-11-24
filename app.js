@@ -36,7 +36,6 @@ const IC = {
   escudo: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logo: '<path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 2L7 11h10z"/><path d="M7 11l5 11 5-11"/><path d="M3.3 7L7 11M20.7 7L17 11"/>',
   siguiente: '<path d="M9 18l6-6-6-6"/>',
-  libro: '<path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>',
   menos: '<path d="M5 12h14"/>'
 };
 const ic = (p, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
@@ -709,7 +708,7 @@ function render() {
   $$('#nav a').forEach(a => a.classList.toggle('activa', a.dataset.tab === tab));
   document.title = v.titulo + ' · Encuentros D&D';
   const clave = r.v + '/' + r.id;
-  if (clave !== ultimaRuta) { window.scrollTo(0, 0); ultimaRuta = clave; if (r.v !== 'combate') modoReordenar = false; if (r.v === 'combate') desplazarAlTurno = true; }
+  if (clave !== ultimaRuta) { window.scrollTo(0, 0); ultimaRuta = clave; opVista = ''; if (r.v !== 'combate') modoReordenar = false; if (r.v === 'combate') desplazarAlTurno = true; }
   if (desplazarAlTurno) {
     desplazarAlTurno = false;
     const a = $('.carta.actual'); if (a) a.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -2204,7 +2203,7 @@ function htmlMaestria(cid, elegidas, ya, chip) {
   const f = FILTRO_MAESTRIA[cid] || (() => true);
   const grupos = [['Cuerpo a cuerpo sencillas', a => a.categoria === 'sencilla' && a.tipo === 'cac'], ['A distancia sencillas', a => a.categoria === 'sencilla' && a.tipo === 'distancia'], ['Cuerpo a cuerpo marciales', a => a.categoria === 'marcial' && a.tipo === 'cac'], ['A distancia marciales', a => a.categoria === 'marcial' && a.tipo === 'distancia']];
   return grupos.map(([t, g]) => { const l = (CR.armas || []).filter(a => f(a) && g(a)); return l.length ? `<p class="wz-grupo-herr">${t}</p><div class="chips">${l.map(a => chip(a.nombre, elegidas.includes(a.nombre), `${a.nombre} · ${a.maestria}`, !elegidas.includes(a.nombre) && ya.includes(a.nombre))).join('')}</div>` : ''; }).join('')
-    + `<details class="regla"><summary>¿Qué hace cada maestría?</summary><div class="cuerpo">${(CR.maestrias || []).map(m => `<p><b>${esc(m.nombre)}.</b> ${esc(m.texto)}</p>`).join('')}</div></details>`;
+    + detMaestria(elegidas) + `<details class="regla"><summary>¿Qué hace cada maestría?</summary><div class="cuerpo">${(CR.maestrias || []).map(m => `<p><b>${esc(m.nombre)}.</b> ${esc(m.texto)}</p>`).join('')}</div></details>`;
 }
 // Invocaciones sobrenaturales que puede aprender (requisitos del SRD)
 function invocacionValida(inv, nivel, conocidas, trucos) {
@@ -2216,11 +2215,12 @@ function invocacionValida(inv, nivel, conocidas, trucos) {
   }
   return '';
 }
-function htmlInvocaciones(nivel, conocidas, elegidas, trucos, op) {
+function htmlInvocaciones(nivel, conocidas, elegidas, trucos, datos) {
   return `<div class="wz-ops">${(CR.invocaciones || []).map(inv => {
     const on = elegidas.includes(inv.id), ya = conocidas.includes(inv.id) && !inv.repetible;
     const no = ya ? 'ya la conoce' : invocacionValida(inv, nivel, [...conocidas, ...elegidas.filter(x => x !== inv.id)], trucos);
-    return conLeer(op(inv.id, on, `<b>${esc(inv.nombre)}</b><small>${inv.requisitos ? 'Requisitos: ' + esc(inv.requisitos) : 'Sin requisitos'}${no && !on ? ` · <span class="no">${esc(no)}</span>` : ''}</small>${on ? `<div class="wz-op-det">${inv.html}</div>` : ''}`, !!no && !on), 'invoc', inv.id);
+    return opcion({ clave: 'invoc|' + inv.id, datos: datos(inv.id), on, no, titulo: esc(inv.nombre), html: inv.html,
+      sub: `${inv.requisitos ? 'Requisitos: ' + esc(inv.requisitos) : 'Sin requisitos'}${no && !on ? ` · <span class="no">${esc(no)}</span>` : ''}` });
   }).join('')}</div>`;
 }
 // Orden divina (clérigo) y Orden primigenia (druida)
@@ -2489,8 +2489,9 @@ A.wzLista = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v, max = +el.dataset.max;
   const l = (w[k] ||= []), i = l.indexOf(v);
   if (i >= 0) l.splice(i, 1);
-  else if (l.length >= max) { toast(`Ya has elegido ${max}. Quita uno primero.`); return; }
+  else if (l.length >= max) { opLleno(el, max); return; }
   else l.push(v);
+  opVista = '';
   if (k === 'invoc' && !l.includes('pacto-del-grimorio')) { w.conj ||= {}; w.conj.grimT = []; w.conj.grimR = []; }
   wzPintar(false);
 };
@@ -2672,19 +2673,49 @@ function wzFalta(p) {
   if (p === 6) { if (!w.nombre.trim()) return 'Escribe el nombre del personaje'; if (w.idiomas.length !== 2) return 'Elige 2 idiomas además del común'; }
   return '';
 }
-// Opción con un botón «Leer» al lado: abre la descripción completa sin elegirla (también si no se puede elegir)
-const conLeer = (boton, tipo, id) => `<div class="wz-op-caja">${boton}<button class="wz-leer" data-a="leerInfo" data-t="${tipo}" data-id="${esc(id)}" aria-label="Leer la descripción completa">${ic(IC.libro)}Leer</button></div>`;
-function infoOpcion(t, id) {
-  if (t === 'dote') { const d = CR.dotes.find(x => x.id === id); return d && { titulo: d.nombre, sub: [d.categoriaTexto, d.requisitos ? 'Requisitos: ' + d.requisitos : ''].filter(Boolean).join(' · '), html: d.html }; }
-  if (t === 'invoc') { const d = (CR.invocaciones || []).find(x => x.id === id); return d && { titulo: d.nombre, sub: d.requisitos ? 'Requisitos: ' + d.requisitos : 'Sin requisitos', html: d.html }; }
-  if (t === 'meta') { const d = (CR.metamagia || []).find(x => x.id === id); return d && { titulo: d.nombre, sub: 'Coste: ' + d.coste, html: d.html }; }
-  if (t === 'orden') { const [cid, nom] = id.split('|'); const c = CR.clases.find(x => x.id === cid); return c && { titulo: nom, sub: ORDENES[cid].rasgo, html: detalleOrden(c, nom) }; }
-  if (t === 'linaje') { const [eid, oid] = id.split('|'); const e = CR.especies.find(x => x.id === eid), o = e && e.linaje.opciones.find(x => x.id === oid); return o && { titulo: o.nombre, sub: e.nombre, html: detalleLinaje(e, o) }; }
-  return null;
-}
-A.leerInfo = el => {
-  const i = infoOpcion(el.dataset.t, el.dataset.id); if (!i) return;
-  abrirHoja(() => `<div class="hp-cab"><div><h3>${esc(i.titulo)}</h3>${i.sub ? `<div class="sub">${esc(i.sub)}</div>` : ''}</div><button class="icono" data-a="cerrarHoja" aria-label="Cerrar">${ic(IC.cerrar)}</button></div><div class="regla-txt">${enlazarConjuros(i.html)}</div>`, { fija: true });
+// Opción que se despliega al tocarla: elegida, enseña su texto completo debajo; si no se puede elegir,
+// el toque solo despliega el texto (opVista) sin elegirla.
+let opVista = '';
+const opcion = ({ clave, datos, on, no, titulo, sub, html }) => {
+  const bloq = !!no && !on, abierta = on || opVista === clave;
+  return `<div class="wz-op-caja${on ? ' on' : ''}${bloq ? ' bloq' : ''}${abierta ? ' abierta' : ''}"><button class="wz-op" ${bloq ? 'data-a="verOp"' : datos} data-o="${esc(clave)}" aria-pressed="${!!on}" aria-expanded="${abierta}"><b>${titulo}</b>${sub ? `<small>${sub}</small>` : ''}</button>${abierta ? `<div class="wz-op-det">${enlazarConjuros(html)}</div>` : ''}</div>`;
+};
+A.verOp = el => { opVista = opVista === el.dataset.o ? '' : el.dataset.o; render(); };
+// Si ya no caben más, una opción se despliega sin elegirla (los chips solo avisan)
+const opLleno = (el, max) => {
+  if (!el.dataset.o) { toast(`Ya has elegido ${max}. Quita uno primero.`); return; }
+  opVista = opVista === el.dataset.o ? '' : el.dataset.o;
+  if (opVista) toast(`Ya has elegido ${max}: puedes leerla, pero quita una para poder elegir esta.`);
+  render();
+};
+// Qué hace cada habilidad (tabla «Habilidades» del SRD 5.2.1) y cada arma de maestría elegida
+const HAB_TXT = {
+  acrobacias: 'Conservar el equilibrio en situaciones difíciles o realizar una proeza acrobática.',
+  atletismo: 'Saltar más lejos de lo normal, mantenerse a flote en aguas revueltas o romper algo.',
+  'conocimiento-arcano': 'Recordar información acerca de conjuros, objetos mágicos y los planos de existencia.',
+  engano: 'Contar una mentira convincente o llevar un disfraz de manera creíble.',
+  historia: 'Recordar información sobre acontecimientos, personas, naciones y culturas de carácter histórico.',
+  interpretacion: 'Actuar, contar una historia, tocar un instrumento o bailar.',
+  intimidacion: 'Asustar o amenazar a alguien para que haga lo que tú quieres.',
+  investigacion: 'Encontrar información oculta en libros o deducir cómo funciona algo.',
+  'juego-de-manos': 'Vaciar los bolsillos a alguien, ocultar un objeto que llevas en la mano o hacer trucos de prestidigitación.',
+  medicina: 'Diagnosticar una enfermedad o determinar de qué ha muerto un fallecido reciente.',
+  naturaleza: 'Recordar información acerca del terreno, la flora, la fauna y el clima.',
+  percepcion: 'Mediante una combinación de sentidos, darse cuenta de algo que es fácil pasar por alto.',
+  perspicacia: 'Discernir el estado de ánimo y las intenciones de una persona.',
+  persuasion: 'Convencer a alguien de algo de una manera sincera y amable.',
+  religion: 'Recordar información sobre dioses, rituales religiosos y símbolos sagrados.',
+  sigilo: 'Pasar desapercibido al caminar en silencio y ocultarse detrás de las cosas.',
+  supervivencia: 'Seguir huellas, forrajear, encontrar un camino o evitar peligros naturales.',
+  'trato-con-animales': 'Tranquilizar o adiestrar a un animal, o conseguir que se comporte de una determinada forma.'
+};
+const detHabs = lista => {
+  const l = (lista || []).map(n => CR.habilidades.find(h => norm(h.nombre) === norm(n || ''))).filter(Boolean);
+  return l.length ? `<div class="wz-det det-elegidas">${l.map(h => `<p><b>${esc(h.nombre)} (${CAR_NOMBRE[h.car]}).</b> ${HAB_TXT[h.id]}</p>`).join('')}</div>` : '';
+};
+const detMaestria = lista => {
+  const l = (lista || []).map(n => (CR.armas || []).find(a => a.nombre === n)).filter(Boolean);
+  return l.length ? `<div class="wz-det det-elegidas">${l.map(a => { const m = (CR.maestrias || []).find(x => norm(x.nombre) === norm(a.maestria)); return `<p><b>${esc(a.nombre)} · ${esc(a.maestria)}.</b> ${m ? esc(m.texto) : ''}</p>`; }).join('')}</div>` : '';
 };
 const wzOp = (accion, k, v, on, titulo, sub) => `<button class="wz-op${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}"><b>${esc(titulo)}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
 const wzChip = (accion, k, v, on, txt, deshab) => `<button class="chip${on ? ' on' : ''}" data-a="${accion}" data-k="${k}" data-v="${esc(v)}" aria-pressed="${on}" ${deshab ? 'disabled' : ''}>${esc(txt)}</button>`;
@@ -2699,17 +2730,17 @@ function wzPasoClase() {
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(c.nombre)}</h2>
       <div class="wz-det"><p><b>Salvaciones:</b> ${esc(c.salvaciones)}</p><p><b>Armaduras:</b> ${esc(c.armaduras)}</p><p><b>Armas:</b> ${esc(c.armas)}</p>${c.herramientas && !/^ninguna/i.test(c.herramientas) ? `<p><b>Herramientas:</b> ${esc(c.herramientas)}</p>` : ''}</div>
       <h3 class="sub-tit">Elige ${n} habilidades <span class="cuenta">${w.habClase.length}/${n}</span></h3>
-      <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>
+      <div class="chips">${ops.map(h => wzChip('wzHab', 'habClase', h, w.habClase.includes(h), h)).join('')}</div>${detHabs(w.habClase)}
       ${(() => { const eh = eleccionHerr(c.herramientas); return eh ? `<h3 class="sub-tit">Herramientas: ${eh.txt.toLowerCase()} <span class="cuenta">${(w.herrClase || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrClase', eh.filtro, w.herrClase || [], () => false)}` : ''; })()}
       ${htmlAvisoHerr()}
-      ${ORDENES[c.id] ? `<h3 class="sub-tit">${ORDENES[c.id].rasgo}</h3><p class="nota" style="margin-top:0">Elige una de las dos funciones. Toca <b>Leer</b> para ver su texto completo.</p>
-        <div class="wz-ops">${ORDENES[c.id].ops.map(([id, nom, res]) => { const on = w.ordenClase === id; return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="ordenClase" data-v="${id}" aria-pressed="${on}"><b>${nom}</b><small>${res}</small>${on ? `<div class="wz-op-det">${detalleOrden(c, nom)}</div>` : ''}</button>`, 'orden', c.id + '|' + nom); }).join('')}</div>` : ''}
+      ${ORDENES[c.id] ? `<h3 class="sub-tit">${ORDENES[c.id].rasgo}</h3><p class="nota" style="margin-top:0">Elige una de las dos funciones. Al tocarla se despliega su texto completo.</p>
+        <div class="wz-ops">${ORDENES[c.id].ops.map(([id, nom, res]) => { const on = w.ordenClase === id; return opcion({ clave: 'orden|' + id, datos: `data-a="wzSet" data-k="ordenClase" data-v="${id}"`, on, titulo: esc(nom), sub: res, html: detalleOrden(c, nom) }); }).join('')}</div>` : ''}
       ${nMaestria(c.id, 1) ? `<h3 class="sub-tit">Maestría con armas: elige ${nMaestria(c.id, 1)} tipos de armas <span class="cuenta">${(w.maestria || []).length}/${nMaestria(c.id, 1)}</span></h3>
         <p class="nota" style="margin-top:0">Con esas armas podrá usar su propiedad de maestría (aparece junto al nombre). Tras un descanso largo puede cambiar una.</p>
         ${htmlMaestria(c.id, w.maestria || [], [], (v, on, txt, des) => `<button class="chip${on ? ' on' : ''}" data-a="wzLista" data-k="maestria" data-v="${esc(v)}" data-max="${nMaestria(c.id, 1)}" ${des ? 'disabled' : ''}>${esc(txt)}</button>`)}` : ''}
       ${c.id === 'brujo' ? `<h3 class="sub-tit">Invocación sobrenatural: elige 1 <span class="cuenta">${(w.invoc || []).length}/1</span></h3>
-        <p class="nota" style="margin-top:0">El SRD pone de ejemplo el Pacto del grimorio. A nivel 1 solo puede elegir las que no piden nivel ni otros requisitos. Toca <b>Leer</b> en cualquiera para ver su texto completo.</p>
-        ${htmlInvocaciones(1, [], w.invoc || [], [], (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="wzLista" data-k="invoc" data-v="${v}" data-max="1" ${des ? 'disabled' : ''}>${inner}</button>`)}` : ''}
+        <p class="nota" style="margin-top:0">El SRD pone de ejemplo el Pacto del grimorio. A nivel 1 solo puede elegir las que no piden nivel ni otros requisitos. Al tocar cualquiera se despliega su texto completo, también las que aún no puede elegir.</p>
+        ${htmlInvocaciones(1, [], w.invoc || [], [], v => `data-a="wzLista" data-k="invoc" data-v="${v}" data-max="1"`)}` : ''}
       <h3 class="sub-tit">Equipo inicial</h3>
       <div class="wz-ops">${Object.entries(c.equipoOpciones).map(([k, v]) => wzOp('wzSet', 'equipoClase', k, w.equipoClase === k, 'Opción ' + k, esc(v))).join('')}</div>
       <h3 class="sub-tit">Rasgos de nivel 1</h3>${wzRasgos(c.rasgos.filter(r => r.nivel === 1), 'rc')}</section>`;
@@ -2725,7 +2756,7 @@ function wzPasoTrasfondo() {
     const repetidas = t.habilidades.filter(h => w.habClase.some(x => norm(x) === norm(h)));
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(t.nombre)}</h2>
       <div class="wz-det"><p><b>Características:</b> ${t.caracteristicas.map(k => CAR_NOMBRE[k]).join(', ')} (las subirás en el paso de características)</p>
-      <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p><p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
+      <p><b>Habilidades:</b> ${t.habilidades.map(esc).join(' y ')}</p>${detHabs(t.habilidades)}<p><b>Herramienta:</b> ${esc(t.herramienta)}</p></div>
       ${(() => { const eh = eleccionHerr(t.herramienta); if (!eh) return ''; const deClase = new Set((w.herrClase || []).map(norm)); return `<h3 class="sub-tit">${eh.txt} <span class="cuenta">${(w.herrTras || []).length}/${eh.n}</span></h3>${htmlElegirHerr('herrTras', eh.filtro, w.herrTras || [], n => deClase.has(norm(n)))}`; })()}
       ${repetidas.length ? `<div class="aviso malo"><span><b>${repetidas.map(esc).join(' y ')}</b> ya la${repetidas.length > 1 ? 's' : ''} elegiste en la clase. Vuelve al paso 1 y elige otra${repetidas.length > 1 ? 's' : ''} en su lugar.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}
       ${htmlAvisoHerr()}
@@ -2746,21 +2777,22 @@ function wzPasoEspecie() {
     html += `<section class="bloque" id="wz-detalle"><h2 style="font-size:1rem;margin:0 0 6px">${esc(e.nombre)}</h2>`;
     if (e.linaje) {
       const l = e.linaje;
-      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><p class="nota" style="margin-top:0">Toca uno para elegirlo, o <b>Leer</b> para ver lo que da sin elegirlo.</p>
+      html += `<h3 class="sub-tit">${esc(l.rasgo)}</h3><p class="nota" style="margin-top:0">Toca uno para elegirlo y ver lo que da.</p>
         <div class="wz-ops">${l.opciones.map(o => {
           const on = o.id === w.linaje;
-          return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="wzSet" data-k="linaje" data-v="${o.id}" aria-pressed="${on}" aria-expanded="${on}"><b>${esc(o.nombre)}</b><small>${esc(RESUMEN_LINAJE[o.id] || '')}</small>${on ? `<div class="wz-op-det">${detalleLinaje(e, o)}</div>` : ''}</button>`, 'linaje', e.id + '|' + o.id);
+          return opcion({ clave: 'linaje|' + o.id, datos: `data-a="wzSet" data-k="linaje" data-v="${o.id}"`, on, titulo: esc(o.nombre), sub: esc(RESUMEN_LINAJE[o.id] || ''), html: detalleLinaje(e, o) });
         }).join('')}</div>`;
       if (l.aptitud) html += `<h3 class="sub-tit">Aptitud mágica del linaje</h3><div class="seg">${['int', 'sab', 'car'].map(k => `<button class="opc ${w.aptitud === k ? 'on' : ''}" data-a="wzSet" data-k="aptitud" data-v="${k}">${CAR_NOMBRE[k]}</button>`).join('')}</div>`;
     }
     if (e.tamanos.length > 1) html += `<h3 class="sub-tit">Tamaño</h3><div class="seg">${e.tamanos.map(t => `<button class="opc ${w.tamano === t ? 'on' : ''}" data-a="wzSet" data-k="tamano" data-v="${t}">${t}</button>`).join('')}</div><p class="nota" style="margin-top:0">${esc(e.tamanoTexto)}</p>`;
-    if (e.id === 'elfo') html += `<h3 class="sub-tit">Sentidos agudos: elige una habilidad</h3><div class="chips">${SENTIDOS_AGUDOS.map(h => wzChip('wzSet', 'habEspecie', h, w.habEspecie === h, h, ocupada(h) && w.habEspecie !== h)).join('')}</div>
+    if (e.id === 'elfo') html += `<h3 class="sub-tit">Sentidos agudos: elige una habilidad</h3><div class="chips">${SENTIDOS_AGUDOS.map(h => wzChip('wzSet', 'habEspecie', h, w.habEspecie === h, h, ocupada(h) && w.habEspecie !== h)).join('')}</div>${detHabs([w.habEspecie])}
       ${SENTIDOS_AGUDOS.every(ocupada) ? `<div class="aviso malo"><span>Ya es competente en las tres por su clase o su trasfondo. Cambia una de las habilidades de la clase para no perder este atributo.</span><button class="btn mini" data-a="wzIr" data-n="0">Cambiar</button></div>` : ''}`;
     if (e.id === 'humano') {
-      html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre) && w.habEspecie !== h.nombre)).join('')}</div>
+      html += `<h3 class="sub-tit">Diestro: elige una habilidad</h3><div class="chips">${CR.habilidades.map(h => wzChip('wzSet', 'habEspecie', h.nombre, w.habEspecie === h.nombre, h.nombre, ocupada(h.nombre) && w.habEspecie !== h.nombre)).join('')}</div>${detHabs([w.habEspecie])}
         <h3 class="sub-tit">Versátil: elige una dote de origen</h3><div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'origen').map(d => {
           const deTras = wzTras() && wzTras().doteId === d.id, no = deTras && !d.repetible;
-          return conLeer(`<button class="wz-op${w.doteHumano === d.id ? ' on' : ''}" data-a="wzSet" data-k="doteHumano" data-v="${d.id}" aria-pressed="${w.doteHumano === d.id}" ${no && w.doteHumano !== d.id ? 'disabled' : ''}><b>${esc(d.nombre)}${d.id === 'habilidoso' ? ' (recomendada)' : ''}</b>${deTras ? `<small>${no ? 'Ya la da su trasfondo: no se puede tener dos veces' : 'Ya la da su trasfondo: se puede repetir con otra lista de conjuros'}</small>` : ''}</button>`, 'dote', d.id); }).join('')}</div>`;
+          return opcion({ clave: 'humano|' + d.id, datos: `data-a="wzSet" data-k="doteHumano" data-v="${d.id}"`, on: w.doteHumano === d.id, no, titulo: esc(d.nombre) + (d.id === 'habilidoso' ? ' (recomendada)' : ''), html: d.html,
+            sub: deTras ? (no ? 'Ya la da su trasfondo: no se puede tener dos veces' : 'Ya la da su trasfondo: se puede repetir con otra lista de conjuros') : '' }); }).join('')}</div>`;
       if (w.doteHumano === 'habilidoso') {
         const herrD = w.herrDote || [], total = w.habDote.length + herrD.length;
         const yaHerr = wzHerramientas(), ocupadaH = n => yaHerr.has(norm(n)) && yaHerr.get(norm(n)).origen !== 'dote';
@@ -2768,13 +2800,12 @@ function wzPasoEspecie() {
         html += `<h3 class="sub-tit">Habilidoso: elige 3 en total <span class="cuenta">${total}/3</span></h3>
           <p class="nota" style="margin-top:0">Gana competencia en <b>3, combinando como quieras habilidades y herramientas</b>: 3 habilidades, 2 habilidades y 1 herramienta, 1 habilidad y 2 herramientas, o 3 herramientas.</p>
           <p class="wz-grupo-herr">Habilidades</p>
-          <div class="chips">${CR.habilidades.map(h => wzChip('wzHab', 'habDote', h.nombre, w.habDote.includes(h.nombre), h.nombre, !w.habDote.includes(h.nombre) && (ocupada(h.nombre) || norm(h.nombre) === norm(w.habEspecie)))).join('')}</div>
+          <div class="chips">${CR.habilidades.map(h => wzChip('wzHab', 'habDote', h.nombre, w.habDote.includes(h.nombre), h.nombre, !w.habDote.includes(h.nombre) && (ocupada(h.nombre) || norm(h.nombre) === norm(w.habEspecie)))).join('')}</div>${detHabs(w.habDote)}
           ${htmlElegirHerr('herrDote', () => true, herrD, ocupadaH)}
           <p class="wz-grupo-herr">Herramienta personalizada</p>
           ${propias.length ? `<div class="chips" style="margin-bottom:6px">${propias.map(n => wzChip('wzHerr', 'herrDote', n, true, n + ' ✕')).join('')}</div>` : ''}
           <div class="fila-anadir"><input id="wz-herr-propia" placeholder="Escribe una herramienta inventada" maxlength="60" enterkeyhint="done"><button class="btn peq" data-a="wzHerrPropia">Añadir</button></div>`;
       }
-      else if (w.doteHumano) { const d = doteSRD(w.doteHumano); html += `<div class="wz-det">${d.html}</div>`; }
     }
     html += `<h3 class="sub-tit">Atributos especiales</h3>${wzRasgos(e.rasgos, 're')}</section>`;
   }
@@ -2894,14 +2925,13 @@ function htmlPericia() {
       <p style="margin:4px 0">Elige <b>2 habilidades en las que ya es competente</b>. En ellas su bonificador por competencia <b>se duplica</b> (a nivel 1 pasa de +2 a +4). No se puede tener pericia dos veces en la misma habilidad.</p>
       <p style="margin:4px 0">El SRD recomienda <b>Juego de manos</b> y <b>Sigilo</b> si es competente en ellas (★). En el nivel 6 de pícaro ganará pericia en otras 2.</p></div>
     <h3 class="sub-tit">Elige 2 habilidades <span class="cuenta">${sel.length}/2</span></h3>
-    <div class="chips">${comp.map(h => wzChip('wzPericia', 'pericia', h, sel.includes(h), (/^(Juego de manos|Sigilo)$/.test(h) ? '★ ' : '') + txt(h))).join('')}</div>`;
+    <div class="chips">${comp.map(h => wzChip('wzPericia', 'pericia', h, sel.includes(h), (/^(Juego de manos|Sigilo)$/.test(h) ? '★ ' : '') + txt(h))).join('')}</div>${detHabs(sel)}`;
 }
 function htmlEstilo1() {
-  const w = WZ(), sel = CR.dotes.find(d => d.id === w.estilo);
+  const w = WZ();
   return `<div class="reglas-box"><div class="reglas-tit">Estilo de combate · rasgo de guerrero de nivel 1</div>
       <p style="margin:4px 0">Elige una dote de estilo de combate. El SRD recomienda <b>Defensa</b>. Cada vez que suba de nivel de guerrero puede cambiarla por otra.</p></div>
-    <div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'estilo-de-combate').map(d => conLeer(wzOp('wzSet', 'estilo', d.id, w.estilo === d.id, d.nombre + (d.id === 'defensa' ? ' ★' : ''), ''), 'dote', d.id)).join('')}</div>
-    ${sel ? `<div class="wz-det">${sel.html}</div>` : ''}`;
+    <div class="wz-ops">${CR.dotes.filter(d => d.categoria === 'estilo-de-combate').map(d => opcion({ clave: 'estilo|' + d.id, datos: `data-a="wzSet" data-k="estilo" data-v="${d.id}"`, on: w.estilo === d.id, titulo: esc(d.nombre) + (d.id === 'defensa' ? ' ★' : ''), html: d.html })).join('')}</div>`;
 }
 function wzPasoPericiaConjuros() {
   if (!esPicaro() && !wzEstilo1()) return wzPasoConjuros();
@@ -3068,6 +3098,7 @@ A.crearPJ = async () => {
 };
 A.wzSet = el => {
   const w = WZ(), k = el.dataset.k, v = el.dataset.v;
+  opVista = '';
   if (w[k] === v && (k === 'habEspecie' || k === 'doteHumano')) w[k] = null; else w[k] = v;
   w.magia ||= {};
   if (k === 'clase') { w.habClase = []; w.equipoClase = 'A'; w.orden = null; w.ordenClase = null; w.conj = {}; w.herrClase = []; w.pericia = []; w.estilo = null; w.maestria = []; w.invoc = []; }
@@ -3466,7 +3497,7 @@ function iniciadoDisp(pj, r) {
 // Elecciones extra de algunas dotes (aumento de característica, Iniciado en la magia, Habilidoso)
 function htmlExtrasDote(pj, s, r, cars) {
   const d = CR.dotes.find(x => x.id === r.dote); if (!d) return '';
-  let html = `<div class="wz-det">${d.html}</div>`;
+  let html = '';
   const au = aumentoDote(d);
   if (au) html += `<p class="wz-grupo-herr">Aumenta en 1 (máximo ${au.max})</p><div class="seg">${au.opciones.map(k => suOpc(s, 'car', k, r.car === k, `${CAR_ABR[k]} ${pj[k] ?? 10}`, (pj[k] ?? 10) >= au.max)).join('')}</div>`;
   if (d.id === 'iniciado-en-la-magia') {
@@ -3481,7 +3512,7 @@ function htmlExtrasDote(pj, s, r, cars) {
     const comp = new Set((pj.hoja.habilidades || []).map(norm)), herrYa = new Set((pj.hoja.herramientas || []).map(norm));
     const total = r.hab.length + r.herr.length;
     html += `<p class="nota">Elige 3 en total entre habilidades y herramientas <span class="cuenta">${total}/3</span></p>
-      <p class="wz-grupo-herr">Habilidades</p><div class="chips">${CR.habilidades.map(h => suChip(s, 'hab', h.nombre, r.hab.includes(h.nombre), h.nombre, 3 - r.herr.length, comp.has(norm(h.nombre)))).join('')}</div>
+      <p class="wz-grupo-herr">Habilidades</p><div class="chips">${CR.habilidades.map(h => suChip(s, 'hab', h.nombre, r.hab.includes(h.nombre), h.nombre, 3 - r.herr.length, comp.has(norm(h.nombre)))).join('')}</div>${detHabs(r.hab)}
       ${GRUPOS_HERR.map(([tit, f]) => `<p class="wz-grupo-herr">${tit}</p><div class="chips">${HERR().filter(f).map(h => suChip(s, 'herr', h.nombre, r.herr.includes(h.nombre), h.grupo ? h.nombre.replace(/^[^:]+:\s*/, '') : h.nombre, 3 - r.hab.length, herrYa.has(norm(h.nombre)))).join('')}</div>`).join('')}
       <p class="wz-grupo-herr">Herramienta personalizada</p>
       ${r.herr.filter(x => !HERR().some(h => h.nombre === x)).map(x => suChip(s, 'herr', x, true, x + ' ✕', 3)).join(' ')}
@@ -3498,7 +3529,7 @@ function htmlElegirDote(pj, s, r, filtro, cars) {
   const cats = [['origen', 'De origen'], ['generales', 'Generales'], ['estilo-de-combate', 'De estilo de combate'], ['don-epico', 'Dones épicos']];
   return cats.map(([cat, tit]) => { const l = ops.filter(d => d.categoria === cat); if (!l.length) return '';
     return `<p class="wz-grupo-herr">${tit}</p><div class="wz-ops">${l.map(d => { const ok = cumpleReq(d, p.c, p.n, cars); const on = r.dote === d.id;
-      return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="suSet" data-s="${s}" data-k="dote" data-v="${d.id}" ${ok ? '' : 'disabled'}><b>${esc(d.nombre)}</b>${d.requisitos ? `<small>Requisitos: ${esc(d.requisitos)}${ok ? '' : ' (no los cumple)'}</small>` : ''}</button>`, 'dote', d.id) + (on ? htmlExtrasDote(pj, s, r, cars) : ''); }).join('')}</div>`; }).join('');
+      return opcion({ clave: s + '|' + d.id, datos: `data-a="suSet" data-s="${s}" data-k="dote" data-v="${d.id}"`, on, no: !ok, titulo: esc(d.nombre), sub: d.requisitos ? `Requisitos: ${esc(d.requisitos)}${ok ? '' : ' <span class="no">(no los cumple)</span>'}` : '', html: d.html }) + (on ? htmlExtrasDote(pj, s, r, cars) : ''); }).join('')}</div>`; }).join('');
 }
 // Habilidades en las que puede ganar pericia ahora (competente y sin pericia; el mago, solo las de Académico)
 function opcionesPericia(pj, p) {
@@ -3555,6 +3586,14 @@ function suDotesFinales(pj, p) {
   if (q.estilo.length) { const i = ids.indexOf(q.estilo[0]); if (i >= 0) ids.splice(i, 1); if ((s.nEstilo || [])[0]) ids.push(s.nEstilo[0]); }
   ['mejora', 'don', 'estilo'].forEach(k => { const r = s.ranuras[k]; if (p[k] && r.dote && r.tipo === 'dote') ids.push(r.dote); });
   return ids;
+}
+// Qué hace cada cosa marcada para quitar
+function detQuitar(k, sel) {
+  if (!sel.length) return '';
+  if (k === 'maestria') return detMaestria(sel);
+  const l = { invoc: CR.invocaciones, meta: CR.metamagia, estilo: CR.dotes }[k];
+  if (l) return sel.map(id => l.find(x => x.id === id)).filter(Boolean).map(x => `<div class="wz-det"><p><b>${esc(x.nombre)}</b></p>${enlazarConjuros(x.html)}</div>`).join('');
+  return `<div class="lista">${sel.map(id => CONJ.get(id)).filter(Boolean).map(x => `<div class="fila"><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${esc(x.escuela)} · toca para leerlo</div></div></div>`).join('')}</div>`;
 }
 A.suQuitar = el => {
   const s = SU(), q = suQ(), k = el.dataset.k, v = el.dataset.v, max = +el.dataset.max, l = q[k], i = l.indexOf(v);
@@ -3643,12 +3682,12 @@ VISTAS.subir = id => {
   if (p.pericia) {
     const ops = opcionesPericia(pj, p), n = Math.min(p.pericia, ops.length);
     html += sec(c.id === 'mago' ? 'Académico (pericia)' : 'Pericia', `<p class="nota" style="margin-top:0">${c.id === 'mago' ? `Elige 1 de estas habilidades en la que ya sea competente: ${ACADEMICO.join(', ')}.` : `Elige ${p.pericia === 1 ? '1 habilidad' : p.pericia + ' habilidades'} en las que ya es competente y aún no tiene pericia.`} Su bonificador por competencia se duplica en ella${p.pericia > 1 ? 's' : ''}. <span class="cuenta">${s.pericia.length}/${n}</span></p>
-      ${ops.length ? `<div class="chips">${ops.map(h => suChip('', 'pericia', h, s.pericia.includes(h), h, n)).join('')}</div>` : '<p class="nota">No es competente en ninguna de ellas, así que este rasgo no le da nada ahora.</p>'}`);
+      ${ops.length ? `<div class="chips">${ops.map(h => suChip('', 'pericia', h, s.pericia.includes(h), h, n)).join('')}</div>${detHabs(s.pericia)}` : '<p class="nota">No es competente en ninguna de ellas, así que este rasgo no le da nada ahora.</p>'}`);
   }
   if (p.habExtra) {
     const comp = new Set((pj.hoja.habilidades || []).map(norm)); s.nHab ||= [];
     html += sec('Competencias adicionales', `<p class="nota" style="margin-top:0">Por el Colegio del conocimiento gana competencia en 3 habilidades de su elección <span class="cuenta">${s.nHab.length}/3</span>.</p>
-      <div class="chips">${CR.habilidades.filter(h => !comp.has(norm(h.nombre))).map(h => suChip('', 'nHab', h.nombre, s.nHab.includes(h.nombre), h.nombre, 3)).join('')}</div>`);
+      <div class="chips">${CR.habilidades.filter(h => !comp.has(norm(h.nombre))).map(h => suChip('', 'nHab', h.nombre, s.nHab.includes(h.nombre), h.nombre, 3)).join('')}</div>${detHabs(s.nHab)}`);
   }
   if (p.terreno) {
     const t = TERRENOS_DRUIDA[s.terreno];
@@ -3659,22 +3698,23 @@ VISTAS.subir = id => {
   // ¿Quiere cambiar algo? (opcional): lo que marque se quita y se elige otro en su sección
   const cambios = suCambios(pj);
   if (cambios.length) {
-    const est = q.estilo.length ? (() => { const ya = (pj.hoja.dotes || []).map(d => d.id), sel = CR.dotes.find(d => d.id === (s.nEstilo || [])[0]);
+    const est = q.estilo.length ? (() => { const ya = (pj.hoja.dotes || []).map(d => d.id);
       const ops = CR.dotes.filter(d => d.categoria === 'estilo-de-combate' && !ya.includes(d.id) && (!suDotesRanuras(p).includes(d.id) || (s.nEstilo || []).includes(d.id)));
-      return `<p class="wz-grupo-herr">Nueva dote de estilo de combate</p>${ops.length ? `<div class="chips">${ops.map(d => suChip('', 'nEstilo', d.id, (s.nEstilo || []).includes(d.id), d.nombre, 1)).join('')}</div>` : '<p class="nota">No le queda ninguna otra dote de estilo de combate: desmarca el cambio.</p>'}${sel ? `<div class="wz-det">${sel.html}</div>` : ''}`; })() : '';
+      return `<p class="wz-grupo-herr">Nueva dote de estilo de combate</p>${ops.length ? `<div class="wz-ops">${ops.map(d => opcion({ clave: 'nEstilo|' + d.id, datos: `data-a="suTog" data-s="" data-k="nEstilo" data-v="${d.id}" data-max="1"`, on: (s.nEstilo || []).includes(d.id), titulo: esc(d.nombre), html: d.html })).join('')}</div>` : '<p class="nota">No le queda ninguna otra dote de estilo de combate: desmarca el cambio.</p>'}`; })() : '';
     html += sec('¿Quiere cambiar algo?', `<p class="nota" style="margin-top:0">Es opcional. Marca lo que quiera quitar y, más abajo, elegirá otro en su lugar: se le pedirá uno más por cada uno que quite. Si no quiere cambiar nada, déjalo como está.</p>`
       + cambios.map(cb => { const sel = q[cb.k];
         return `<details class="regla" ${sel.length ? 'open' : ''}><summary>${esc(cb.titulo)}${sel.length ? ` <span class="cuenta">${sel.length}</span>` : ''}</summary><div class="cuerpo">
           <p class="nota" style="margin-top:0">${esc(cb.regla)}${cb.max > 1 ? '' : ' Toca el que quiera quitar.'}</p>
           <div class="chips">${cb.items.map(it => { const on = sel.includes(it.v), des = !on && !!it.no;
             return `<button class="chip${on ? ' on quitar' : ''}" data-a="suQuitar" data-k="${cb.k}" data-v="${esc(it.v)}" data-max="${cb.max}" aria-pressed="${on}" ${des ? 'disabled' : ''}>${on ? '✕ ' : ''}${esc(it.txt)}${it.no ? ` (${esc(it.no)})` : ''}</button>`; }).join('')}</div>
+          ${detQuitar(cb.k, sel)}
           ${sel.length && cb.donde ? `<p class="nota">Elige ${sel.length === 1 ? 'el nuevo' : 'los nuevos'} en «${cb.donde}», más abajo.</p>` : ''}${cb.k === 'estilo' ? est : ''}</div></details>`; }).join(''));
   }
   if (tot.meta) {
     const ya = pj.hoja.metamagia || []; s.nMeta ||= [];
-    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${tot.meta === 1 ? '1 opción' : tot.meta + ' opciones'} de metamagia${q.meta.length ? ` (${q.meta.length === tot.meta ? 'por la que quita' : 'incluye 1 por la que quita'})` : ''} <span class="cuenta">${s.nMeta.length}/${tot.meta}</span>. Cada una cuesta puntos de hechicería. Toca <b>Leer</b> para ver su texto completo.</p>
+    html += sec('Metamagia', `<p class="nota" style="margin-top:0">Elige ${tot.meta === 1 ? '1 opción' : tot.meta + ' opciones'} de metamagia${q.meta.length ? ` (${q.meta.length === tot.meta ? 'por la que quita' : 'incluye 1 por la que quita'})` : ''} <span class="cuenta">${s.nMeta.length}/${tot.meta}</span>. Cada una cuesta puntos de hechicería. Al tocar una se despliega su texto completo.</p>
       <div class="wz-ops">${(CR.metamagia || []).map(m => { const on = s.nMeta.includes(m.id), des = !on && ya.includes(m.id);
-        return conLeer(`<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${tot.meta}" ${des ? 'disabled' : ''}><b>${esc(m.nombre)}</b><small>Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}</small>${on ? `<div class="wz-op-det">${m.html}</div>` : ''}</button>`, 'meta', m.id); }).join('')}</div>`);
+        return opcion({ clave: 'meta|' + m.id, datos: `data-a="suTog" data-s="" data-k="nMeta" data-v="${m.id}" data-max="${tot.meta}"`, on, no: des, titulo: esc(m.nombre), sub: `Coste: ${esc(m.coste)}${des ? ' · <span class="no">ya la conoce</span>' : ''}`, html: m.html }); }).join('')}</div>`);
   }
   if (p.idiomas) {
     const sabe = new Set((pj.hoja.idiomas || []).map(norm));
@@ -3686,8 +3726,8 @@ VISTAS.subir = id => {
     + htmlMaestria(c.id, s.nMaestria, pj.hoja.maestria || [], (v, on, txt, des) => suChip('', 'nMaestria', v, on, txt, tot.maestria, des)));
   if (tot.invoc) {
     const trucos = [...quedan(pj.conjuros, 'trucos'), ...s.nTrucos];
-    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Toca <b>Leer</b> para ver el texto completo de cualquiera.</p>`
-      + htmlInvocaciones(p.n, quedan(pj.hoja.invocaciones, 'invoc'), s.nInvoc, trucos, (v, on, inner, des) => `<button class="wz-op${on ? ' on' : ''}" data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${tot.invoc}" ${des ? 'disabled' : ''}>${inner}</button>`));
+    html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Al tocar cualquiera se despliega su texto completo, también las que aún no puede elegir.</p>`
+      + htmlInvocaciones(p.n, quedan(pj.hoja.invocaciones, 'invoc'), s.nInvoc, trucos, v => `data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${tot.invoc}"`));
   }
   const tipo = tipoLanzador(c.nombre);
   if (tipo) {
@@ -3713,7 +3753,9 @@ function htmlSuPG(pj) {
 }
 A.suSet = el => {
   const s = SU(), r = el.dataset.s ? s.ranuras[el.dataset.s] : s, k = el.dataset.k, v = el.dataset.v;
-  r[k] = v;
+  opVista = '';
+  // Tocar otra vez la dote elegida la quita (y la pliega)
+  r[k] = k === 'dote' && r[k] === v ? null : v;
   if (el.dataset.s) {
     if (k === 'tipo' || k === 'dote') Object.assign(r, { car: null, lista: null, apt: null, T: [], C: [], hab: [], herr: [], ...(k === 'tipo' ? { dote: null, a: null, b: null } : {}) });
     if (k === 'modo') { r.a = r.b = null; }
@@ -3726,8 +3768,9 @@ A.suTog = el => {
   const s = SU(), r = el.dataset.s ? s.ranuras[el.dataset.s] : s, lista = (r[el.dataset.k] ||= []), v = el.dataset.v, max = +el.dataset.max;
   const i = lista.indexOf(v);
   if (i >= 0) lista.splice(i, 1);
-  else if (lista.length >= max) { toast(`Ya has elegido ${max}. Quita uno primero.`); return; }
+  else if (lista.length >= max) { opLleno(el, max); return; }
   else lista.push(v);
+  opVista = '';
   guardar(); render();
 };
 A.suHerrPropia = el => {

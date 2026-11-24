@@ -575,15 +575,17 @@ details.regla .cuerpo { padding: 0 16px 12px; }
 .inv-nuevo input { flex: 1; }
 .inv-nuevo .btn { flex: none; }
 
-/* Botón «Leer» al lado de cada opción (dotes, invocaciones, metamagia…) */
-.wz-op-caja { position: relative; }
-.wz-op-caja > .wz-op { padding-right: 82px; }
-.wz-leer {
-  position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; gap: 4px;
-  padding: 6px 10px; border-radius: 999px; border: 1px solid var(--borde); background: var(--fondo);
-  color: var(--texto); font-size: .78rem; font-weight: 700; cursor: pointer;
-}
-.wz-leer .ic { width: 14px; height: 14px; }
+/* Opciones que se despliegan al tocarlas (dotes, invocaciones, metamagia, linajes…) */
+.wz-op-caja { border-radius: 14px; border: 1px solid var(--borde); background: var(--superficie); }
+.wz-op-caja > .wz-op { position: relative; border: 0; background: none; box-shadow: none; padding-right: 40px; }
+.wz-op-caja > .wz-op::after { content: ""; position: absolute; right: 16px; top: 17px; width: 8px; height: 8px; border: solid var(--suave); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.wz-op-caja.abierta > .wz-op::after { top: 21px; transform: rotate(225deg); }
+.wz-op-caja.on { border-color: var(--acento); background: color-mix(in srgb, var(--acento) 14%, var(--superficie)); box-shadow: inset 0 0 0 1px var(--acento); }
+.wz-op-caja.bloq > .wz-op > b { color: var(--suave); }
+.wz-op-caja > .wz-op-det { margin: 0 14px 12px; }
+.wz-op-caja:not(.on) > .wz-op-det { border-top-color: var(--borde); }
+.det-elegidas { font-size: .86rem; }
+.wz-det .det-elegidas { margin: 4px 0 8px; padding: 0 0 0 12px; border: 0; border-left: 2px solid var(--borde); border-radius: 0; background: none; }
 /* En las listas de conjuros, el nombre se toca para leerlo: una flechita lo indica */
 .fila .f-txt[data-a="verConjuro"] { position: relative; padding-right: 22px; cursor: pointer; }
 .fila .f-txt[data-a="verConjuro"]::after { content: "›"; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); font-size: 1.4rem; color: var(--suave); }
