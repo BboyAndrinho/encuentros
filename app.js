@@ -1107,6 +1107,7 @@ function intercambiarIni(enc, a, b) {
 VISTAS.ajustes = () => ({
   titulo: 'Ajustes', atras: '#/encuentros',
   html: `
+  ${hayVersionNueva ? `<section class="bloque"><h2 style="font-size:1rem">Versión nueva</h2><p class="nota">Hay una versión nueva de la app lista para usar.</p><button class="btn ok" data-a="actualizarAhora">Actualizar la app</button></section>` : ''}
   <section class="bloque"><h2 style="font-size:1rem">Pantalla</h2>
     <label class="check"><input type="checkbox" data-ch="ajPantalla" ${E.ajustes.pantalla !== false ? 'checked' : ''}> Mantener la pantalla encendida durante el combate</label>
   </section>
@@ -4156,7 +4157,7 @@ document.addEventListener('visibilitychange', gestionarPantalla);
 
 // Funcionamiento sin conexión (solo cuando la app está publicada en internet)
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  // Si ya había una versión guardada y se activa otra nueva, avisamos (sin recargar solos)
+  // Si ya había una versión guardada y se activa otra nueva, preguntamos (sin recargar solos)
   const habiaVersion = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (habiaVersion) mostrarAvisoActualizacion();
@@ -4168,14 +4169,75 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
     });
   }).catch(() => {});
 }
+// Ventana de versión nueva. La versión ya está descargada: actualizar es recargar la app. Si se deja
+// para más tarde, se vuelve a preguntar al cabo de una hora; si antes se cierra la app, al volver a
+// abrirla ya arranca con la versión nueva. No sale mientras se está haciendo algo: con otra ventana
+// abierta, escribiendo, en un combate, creando un personaje o subiéndolo de nivel.
+const ESPERA_ACTUALIZAR = 60 * 60 * 1000;
+let hayVersionNueva = false, actualizarDesde = 0, ultimoToque = 0, hojaActualizar = null;
+['pointerdown', 'keydown', 'wheel', 'touchmove'].forEach(t => document.addEventListener(t, () => { ultimoToque = Date.now(); }, { capture: true, passive: true }));
 function mostrarAvisoActualizacion() {
-  if ($('#actualizacion')) return;
-  const b = document.createElement('button');
-  b.id = 'actualizacion';
-  b.type = 'button';
-  b.innerHTML = '<b>Hay una versión nueva de la app.</b><span>Toca aquí para cargarla. Tus datos no se pierden.</span>';
-  b.addEventListener('click', () => location.reload());
-  document.body.appendChild(b);
+  if (!hayVersionNueva) setInterval(intentarPreguntarActualizar, 2000);
+  hayVersionNueva = true;
+  intentarPreguntarActualizar();
+}
+function intentarPreguntarActualizar() {
+  const a = document.activeElement;
+  if (hojaActualizar || Date.now() < actualizarDesde || document.visibilityState !== 'visible') return;
+  if (hojas.length || sincProgramada || ignorarPop || Date.now() - ultimoToque < 1500) return;
+  if (a && a.matches('input, textarea, select, [contenteditable]')) return;
+  if (['combate', 'crear', 'subir'].includes(ruta().v)) return;
+  preguntarActualizar();
+}
+function preguntarActualizar() {
+  let aceptado = false;
+  hojaActualizar = abrirHoja(() => `<div class="pregunta act-nueva"><h3>Hay una versión nueva de la app</h3>
+    <p>¿Quieres actualizar ahora? Tarda un momento y tus datos no se pierden.</p>
+    <div class="desliza" id="desliza"><span class="desliza-txt">Desliza para actualizar</span>
+      <div class="desliza-bola" role="slider" tabindex="0" aria-label="Desliza hasta el final para actualizar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">${ic('<path d="M6 17l5-5-5-5M13 17l5-5-5-5"/>')}</div></div>
+    <button class="btn peq" data-a="cerrarHoja">Más tarde</button>
+    <p class="nota">Si lo dejas para más tarde, la app volverá a preguntarte dentro de una hora. Si antes cierras la app, se actualizará sola cuando la abras de nuevo.</p></div>`, {
+    fija: true,
+    alPintar: h => prepararDesliza($('#desliza', h.el), () => { aceptado = true; h.cerrar(); }),
+    alCerrar: () => {
+      hojaActualizar = null;
+      if (!aceptado) { actualizarDesde = Date.now() + ESPERA_ACTUALIZAR; return; }
+      toast('Actualizando…');
+      setTimeout(() => location.reload(), 400); // da tiempo a cuadrar el historial de la ventana
+    }
+  });
+  hojaActualizar.el.focus(); // sin marcar ningún botón
+}
+A.actualizarAhora = () => { if (!hojaActualizar) preguntarActualizar(); };
+// Botón que solo vale si se arrastra la bola hasta el final y se suelta allí; si se suelta antes, vuelve al principio
+function prepararDesliza(caja, alFinal) {
+  const bola = $('.desliza-bola', caja), txt = $('.desliza-txt', caja);
+  let x0 = null, x = 0, hecho = false;
+  const tope = () => caja.clientWidth - bola.offsetWidth - 2 * bola.offsetLeft;
+  const llega = () => x >= tope() * .95;
+  const poner = v => {
+    x = Math.max(0, Math.min(tope(), v));
+    caja.style.setProperty('--x', x + 'px');
+    caja.classList.toggle('llega', llega());
+    txt.textContent = llega() ? 'Suelta para actualizar' : 'Desliza para actualizar';
+    bola.setAttribute('aria-valuenow', Math.round(x / (tope() || 1) * 100));
+  };
+  const acabar = () => { if (!hecho) { hecho = true; alFinal(); } };
+  bola.addEventListener('pointerdown', e => { if (x0 !== null || hecho) return; x0 = e.clientX - x; bola.setPointerCapture(e.pointerId); caja.classList.add('arrastra'); });
+  bola.addEventListener('pointermove', e => { if (x0 !== null) poner(e.clientX - x0); });
+  const soltar = (e, vale) => {
+    if (x0 === null) return;
+    x0 = null; caja.classList.remove('arrastra');
+    if (vale && llega()) acabar(); else poner(0);
+  };
+  bola.addEventListener('pointerup', e => soltar(e, true));
+  bola.addEventListener('pointercancel', e => soltar(e, false));
+  // Con teclado: flecha derecha hasta el final e Intro
+  bola.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); poner(x + tope() / 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); poner(x - tope() / 5); }
+    else if (e.key === 'Enter' && llega()) { e.preventDefault(); acabar(); }
+  });
 }
 
 render();
