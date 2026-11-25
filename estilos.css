@@ -608,3 +608,8 @@ details.regla summary small.nv { align-self: center; }
 .chip.on.quitar { background: color-mix(in srgb, var(--peligro) 20%, var(--superficie)); border-color: var(--peligro); }
 /* Aviso de herramientas repetidas en el creador */
 .aviso .botonera-mini { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Foto del personaje */
+.retrato { display: block; max-width: 100%; max-height: 320px; margin: 0 auto 10px; border-radius: 12px; }
+.retrato-mini { float: right; width: 64px; height: 64px; object-fit: cover; object-position: 50% 30%; border-radius: 12px; margin: 0 0 8px 10px; }
+.wz-resumen .wz-stats { clear: both; }
