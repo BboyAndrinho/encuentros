@@ -36,7 +36,8 @@ const IC = {
   escudo: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   logo: '<path d="M12 2l8.7 5v10L12 22l-8.7-5V7z"/><path d="M12 2L7 11h10z"/><path d="M7 11l5 11 5-11"/><path d="M3.3 7L7 11M20.7 7L17 11"/>',
   siguiente: '<path d="M9 18l6-6-6-6"/>',
-  menos: '<path d="M5 12h14"/>'
+  menos: '<path d="M5 12h14"/>',
+  pdf: '<path d="M5 10V4a2 2 0 012-2h8l4 4v4"/><path d="M14.5 2v4.5H19"/><path d="M5 20.5V21a1 1 0 001 1h12a1 1 0 001-1v-.5"/><text x="12" y="18" text-anchor="middle" font-size="8.6" font-weight="800" font-family="system-ui,sans-serif" fill="currentColor" stroke="none">PDF</text>'
 };
 const ic = (p, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 
@@ -3290,7 +3291,6 @@ VISTAS.hoja = id => {
       ${vis || h.tamano ? `<p class="nota" style="margin:6px 0 0">${h.tamano ? 'Tamaño ' + esc(h.tamano) : ''}${vis ? ` · visión en la oscuridad ${vis} m` : ''}</p>` : ''}
       ${vx.m ? `<p class="nota" style="margin:4px 0 0">Velocidad: ${fmtM(velBase)}${v.aplica ? ` + ${fmtM(vx.m)} de <b>${vx.rasgo}</b>, porque ahora ${vx.cond.replace(/^si /, '')}` : `. <b>${vx.rasgo}</b> (+${fmtM(vx.m)}) no se aplica ahora: solo ${vx.cond}`}${v.lenta ? '; −3 m por la Fuerza que pide su armadura' : ''}.</p>` : v.lenta ? `<p class="nota" style="margin:4px 0 0">Velocidad: ${fmtM(velBase)} − 3 m por la Fuerza que pide su armadura.</p>` : ''}
     </div>
-    <button class="btn ancho" data-a="exportarPDF" data-id="${pj.id}">Exportar hoja en PDF</button>
     <h3 class="sub-tit">Armadura y CA</h3>
     <div class="wz-det">
       <p style="margin:0 0 8px">CA <b>${cal.total}</b> = ${cal.partes.map(esc).join(' + ')}</p>
@@ -3335,8 +3335,8 @@ VISTAS.hoja = id => {
     ${(h.niveles || []).length ? `<h3 class="sub-tit">Historial de niveles</h3><div class="wz-det">${h.niveles.map(x => `<p><b>Nivel ${x.nivel}:</b> ${esc(x.resumen)}</p>`).join('')}</div>` : ''}`;
   return {
     titulo: pj.nombre || 'Personaje', atras: '#/personajes', html,
-    acciones: `<a class="icono" href="#/personaje/${pj.id}" aria-label="Editar datos de combate">${ic(IC.editar)}</a>`,
-    pie: n < 20 ? `<a class="btn secundario" href="#/personaje/${pj.id}">Editar</a><button class="btn primario" data-a="subirNivel" data-id="${pj.id}">Subir a nivel ${n + 1}</button>` : `<a class="btn" href="#/personaje/${pj.id}">Editar datos de combate</a>`
+    acciones: `<button class="icono" data-a="exportarPDF" data-id="${pj.id}" aria-label="Exportar hoja en PDF" title="Exportar hoja en PDF">${ic(IC.pdf)}</button><a class="icono" href="#/personaje/${pj.id}" aria-label="Editar datos de combate" title="Editar">${ic(IC.editar)}</a>`,
+    pie: n < 20 ? `<button class="btn primario" data-a="subirNivel" data-id="${pj.id}">Subir a nivel ${n + 1}</button>` : ''
   };
 };
 
