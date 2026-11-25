@@ -3446,6 +3446,9 @@ function suGrupos(pj) {
         + (listas.length > 1 ? ' Por <b>Secretos mágicos</b> puede elegirlos de las listas de bardo, clérigo, druida y mago.' : '') });
   }
   if (q.arcanum.length) { const nv = (CONJ.get(q.arcanum[0]) || {}).nivel; g.push({ k: 'cArc', titulo: `Arcanum místico nuevo de nivel ${nv} (por el que quita)`, n: 1, abierto: nv, filtro: x => x.nivel === nv && enListaDe(x, 'brujo') }); }
+  (pj.hoja.magia || []).forEach((m, i) => { const v = q['magia' + i][0]; if (!v) return; const nv = (CONJ.get(v) || {}).nivel;
+    g.push({ k: 'cMag' + i, titulo: `${nv ? 'Conjuro de nivel 1' : 'Truco'} de ${nomLista(m.lista)} nuevo (Iniciado en la magia, por el que quita)`, n: 1, abierto: nv, filtro: x => x.nivel === nv && enListaDe(x, m.lista), nota: nv ? 'Siempre lo tiene preparado. Puede lanzarlo una vez sin gastar espacio de conjuro (se recupera con un descanso largo).' : '' }); });
+  if (q.descub.length) { const nc = nivelMaxConjuro(c, p.n); g.push({ k: 'cDesc', titulo: 'Descubrimientos mágicos: conjuro nuevo (por el que quita)', n: q.descub.length, abierto: 0, filtro: x => x.nivel <= nc && ['clerigo', 'druida', 'mago'].some(l => enListaDe(x, l)), nota: `Puede ser un truco o un conjuro de nivel 1 a ${nc}. Siempre lo tiene preparado.` }); }
   if ((s.nInvoc || []).includes('pacto-del-grimorio')) GRIMORIO.forEach(gr => g.push({ k: gr.k, titulo: gr.titulo, n: gr.n, filtro: gr.filtro, abierto: -1 }));
   if (p.arcanum) g.push({ k: 'nArc', titulo: `Arcanum místico: 1 conjuro de brujo de nivel ${p.arcanum}`, n: 1, abierto: p.arcanum, filtro: x => x.nivel === p.arcanum && enListaDe(x, 'brujo'), nota: 'Lo lanza una vez sin gastar espacio de conjuro y lo recupera tras un descanso largo.' });
   if (p.descub) g.push({ k: 'nDesc', titulo: 'Descubrimientos mágicos: 2 conjuros de clérigo, druida o mago', n: 2, abierto: 0, filtro: x => x.nivel <= p.nivelConj && ['clerigo', 'druida', 'mago'].some(l => enListaDe(x, l)), nota: `Pueden ser trucos o conjuros de nivel 1 a ${p.nivelConj}. Siempre los tiene preparados.` });
@@ -3556,7 +3559,17 @@ function opcionesPericia(pj, p) {
 }
 // ---- Cambios opcionales al subir de nivel (SRD 5.2.1) ----
 // Lo que puede quitar en esta subida; por cada cosa que quite, elige una más en su sección
-const suQ = () => (SU().quitar ||= { trucos: [], conj: [], invoc: [], arcanum: [], meta: [], maestria: [], estilo: [] });
+const suQ = () => {
+  const s = SU(), q = (s.quitar ||= { trucos: [], conj: [], invoc: [], arcanum: [], meta: [], maestria: [], estilo: [] });
+  // Iniciado en la magia (una lista por cada vez que tenga la dote) y Descubrimientos mágicos del bardo
+  const pj = pjPorId(s.pjId); q.descub ||= [];
+  ((pj && pj.hoja && pj.hoja.magia) || []).forEach((_, i) => { q['magia' + i] ||= []; });
+  return q;
+};
+const suFueraRasgos = q => Object.entries(q).filter(([k]) => /^(magia\d+|descub)$/.test(k)).flatMap(([, l]) => l);
+// Conjuros que eligió con Descubrimientos mágicos (los siempre preparados que no son automáticos)
+const conjDescub = pj => { const auto = new Set(conjSiempre(pj.hoja.clase, 20, pj.hoja).map(x => x.id)); return pj.hoja.clase === 'bardo' ? (pj.hoja.conjSiempre || []).filter(i => !auto.has(i) && (pj.conjuros || []).includes(i)) : []; };
+const nomLista = l => (LISTAS_MAGIA.find(x => x[0] === l) || ['', l])[1].toLowerCase();
 const nomInv = i => (CR.invocaciones.find(x => x.id === i) || {}).nombre || i;
 const nomMeta = i => ((CR.metamagia || []).find(x => x.id === i) || {}).nombre || i;
 function suCambios(pj) {
@@ -3580,6 +3593,15 @@ function suCambios(pj) {
           : ['paladin', 'explorador'].includes(c.id) ? `Tras un descanso largo puede sustituir un conjuro por otro de ${cn} para el que tenga espacios.` : `Al subir de nivel puede sustituir un conjuro por otro de ${cn} para el que tenga espacios.` });
     }
   }
+  // Dote Iniciado en la magia: al subir de nivel puede cambiar uno de sus conjuros (o trucos) por otro del mismo nivel de la misma lista
+  (h.magia || []).forEach((m, i) => {
+    const items = [...(m.trucos || []), ...(m.conjuros || [])].map(v => CONJ.get(v)).filter(x => x && (pj.conjuros || []).includes(x.id)
+      && CONJS.some(y => y.nivel === x.nivel && enListaDe(y, m.lista) && !(pj.conjuros || []).includes(y.id))).map(x => ({ v: x.id, txt: x.nombre + (x.nivel ? ' (nv. 1)' : ' (truco)') }));
+    if (items.length) out.push({ k: 'magia' + i, donde: 'Conjuros', titulo: `Cambiar un conjuro de Iniciado en la magia (${nomLista(m.lista)})`, max: 1, items, regla: `Al subir de nivel puede sustituir uno de los trucos o el conjuro de esta dote por otro del mismo nivel de la lista de ${nomLista(m.lista)}.` });
+  });
+  // Bardo: los conjuros de Descubrimientos mágicos también se pueden cambiar de uno en uno
+  const desc = conjDescub(pj); if (desc.length) out.push({ k: 'descub', donde: 'Conjuros', titulo: 'Cambiar un conjuro de Descubrimientos mágicos', max: 1, regla: 'Al subir de nivel de bardo puede sustituir uno de estos conjuros por otro de las listas de clérigo, druida o mago.',
+    items: desc.map(v => ({ v, txt: CONJ.get(v).nombre + (CONJ.get(v).nivel ? ` (nv. ${CONJ.get(v).nivel})` : ' (truco)') })) });
   if (c.id === 'brujo' && (h.invocaciones || []).length) out.push({ k: 'invoc', donde: 'Invocaciones sobrenaturales', titulo: 'Cambiar una invocación', max: 1,
     regla: 'Al subir de nivel puede sustituir una invocación por otra para la que cumpla los requisitos. No puede quitar una que sea requisito de otra que tenga.',
     items: [...new Set(h.invocaciones)].map(i => { const dep = h.invocaciones.map(x => CR.invocaciones.find(y => y.id === x)).find(y => y && y.requiereInvocacion === i);
@@ -3619,6 +3641,8 @@ A.suQuitar = el => {
   else if (l.length >= max) { toast(max === 1 ? 'Solo puede cambiar uno: desmarca el otro primero.' : `Como mucho ${max}.`); return; }
   else l.push(v);
   if (k === 'arcanum') s.cArc = [];
+  if (/^magia\d+$/.test(k)) s['cMag' + k.slice(5)] = [];
+  if (k === 'descub') s.cDesc = [];
   if (k === 'estilo') s.nEstilo = [];
   guardar(); render();
 };
@@ -3646,13 +3670,15 @@ function suFalta(pj) {
   if (tot.maestria && (s.nMaestria || []).length !== tot.maestria) return `Maestría con armas: elige ${tot.maestria} (llevas ${(s.nMaestria || []).length})`;
   if (tot.invoc && (s.nInvoc || []).length !== tot.invoc) return `Invocaciones: elige ${tot.invoc} (llevas ${(s.nInvoc || []).length})`;
   const grupos = suGrupos(pj);
+  // Lo que se quita de una dote o rasgo tiene que tener recambio
+  const sinRecambio = grupos.find(g => /^(cMag\d+|cDesc|cArc)$/.test(g.k) && g.nEf < g.n); if (sinRecambio) return `${sinRecambio.titulo}: no le queda ninguno nuevo en esa lista. Desmarca ese cambio`;
   for (const g of grupos) if (g.elegidos.length !== g.nEf) return `${g.titulo}: elige ${g.nEf} (llevas ${g.elegidos.length})`;
   // Al quitar una invocación o un truco, las invocaciones que le queden deben seguir cumpliendo sus requisitos
   if (pj.hoja.clase === 'brujo') {
     const inv = [...(pj.hoja.invocaciones || []).filter(i => !q.invoc.includes(i)), ...(s.nInvoc || [])];
-    const nuevosT = grupos.filter(g => /^nTrucos/.test(g.k)).flatMap(g => g.elegidos);
+    const nuevosT = grupos.filter(g => /^(nTrucos|cMag)/.test(g.k)).flatMap(g => g.elegidos);
     const h = pj.hoja, libro = q.invoc.includes('pacto-del-grimorio') ? [...(h.grimorio || []), ...((h.conj || {}).grimT || []), ...((h.conj || {}).grimR || [])] : [];
-    const trucos = [...(pj.conjuros || []).filter(i => !q.trucos.includes(i) && !libro.includes(i)), ...nuevosT];
+    const trucos = [...(pj.conjuros || []).filter(i => !q.trucos.includes(i) && !suFueraRasgos(q).includes(i) && !libro.includes(i)), ...nuevosT];
     for (const id of new Set(inv)) { const x = CR.invocaciones.find(y => y.id === id); const no = x && invocacionValida(x, p.n, inv.filter(y => y !== id), trucos); if (no) return `${x.nombre}: ${no}. Cambia lo que quitas o elige otra cosa`; }
   }
   return '';
@@ -3743,14 +3769,14 @@ VISTAS.subir = id => {
   if (tot.maestria) html += sec('Maestría con armas', `<p class="nota" style="margin-top:0">Elige ${tot.maestria === 1 ? '1 tipo de arma' : tot.maestria + ' tipos de armas'}${q.maestria.length ? ` (${q.maestria.length === tot.maestria ? 'por las que quita' : 'incluye las que quita'})` : ' más'} <span class="cuenta">${s.nMaestria.length}/${tot.maestria}</span>. Sigue teniendo: ${esc(quedan(pj.hoja.maestria, 'maestria').join(', ') || 'ninguna')}.</p>`
     + htmlMaestria(c.id, s.nMaestria, pj.hoja.maestria || [], (v, on, txt, des) => suChip('', 'nMaestria', v, on, txt, tot.maestria, des)));
   if (tot.invoc) {
-    const trucos = [...quedan(pj.conjuros, 'trucos'), ...s.nTrucos];
+    const trucos = [...quedan(pj.conjuros, 'trucos').filter(i => !suFueraRasgos(q).includes(i)), ...s.nTrucos, ...Object.keys(s).filter(k => /^cMag\d+$/.test(k)).flatMap(k => s[k])];
     html += sec('Invocaciones sobrenaturales', `<p class="nota" style="margin-top:0">Aprende ${tot.invoc === 1 ? '1 invocación' : tot.invoc + ' invocaciones'}${q.invoc.length ? ` (${q.invoc.length === tot.invoc ? 'por la que quita' : 'incluye 1 por la que quita'})` : ' nueva' + (tot.invoc > 1 ? 's' : '')} <span class="cuenta">${s.nInvoc.length}/${tot.invoc}</span>. Sigue conociendo: ${esc(quedan(pj.hoja.invocaciones, 'invoc').map(nomInv).join(', ') || 'ninguna')}. Al tocar cualquiera se despliega su texto completo, también las que aún no puede elegir.</p>`
       + htmlInvocaciones(p.n, quedan(pj.hoja.invocaciones, 'invoc'), s.nInvoc, trucos, v => `data-a="suTog" data-s="" data-k="nInvoc" data-v="${v}" data-max="${tot.invoc}"`));
   }
   const tipo = tipoLanzador(c.nombre);
-  if (tipo) {
-    const esp = tipo === 'pacto' ? `${PACTO_BRUJO[p.n][0]} espacios de nivel ${PACTO_BRUJO[p.n][1]}` : (tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[p.n].map((x, i) => x ? `${x} de nivel ${i + 1}` : '').filter(Boolean).join(', ');
-    let h = `<p class="nota" style="margin-top:0">Espacios de conjuro a nivel ${p.n}: <b>${esp}</b> (se actualizan solos).</p>`;
+  if (tipo || p.auto.length || suGrupos(pj).length) {
+    const esp = !tipo ? '' : tipo === 'pacto' ? `${PACTO_BRUJO[p.n][0]} espacios de nivel ${PACTO_BRUJO[p.n][1]}` : (tipo === 'completo' ? ESPACIOS_COMPLETO : ESPACIOS_MEDIO)[p.n].map((x, i) => x ? `${x} de nivel ${i + 1}` : '').filter(Boolean).join(', ');
+    let h = !tipo ? '' : `<p class="nota" style="margin-top:0">Espacios de conjuro a nivel ${p.n}: <b>${esp}</b> (se actualizan solos).</p>`;
     if (p.auto.length) h += `<h3 class="sub-tit">Gana siempre preparados</h3><p class="nota" style="margin-top:0">Se los da ${[...new Set(p.auto.map(a => ({ terreno: 'su Círculo de la tierra', subclase: 'su subclase (' + esc(c.subclase.nombre) + ')', especie: 'su linaje', clase: 'su clase' })[a.origen]))].join(' y ')}. No cuentan entre los que elige.</p>
       <div class="lista">${p.auto.map(a => { const x = CONJ.get(a.id); return `<div class="fila"><span class="marca-conj on">✓</span><div class="f-txt" data-a="verConjuro" data-id="${x.id}"><div class="f-tit">${esc(x.nombre)} ${etiquetasConj(x)}</div><div class="f-sub">${nivelTxt(x.nivel)} · ${esc(x.escuela)}</div></div></div>`; }).join('')}</div>`;
     const grupos = suGrupos(pj);
@@ -3830,7 +3856,7 @@ A.suConfirmar = () => {
   if (p.subclase) { h.subclase = p.c.subclase.nombre; resumen.push('subclase ' + h.subclase); }
   const nombresC = ids => ids.map(i => (CONJ.get(i) || {}).nombre || i).join(', ');
   // Cambios opcionales: primero se quita lo marcado y luego se añade lo nuevo
-  const fuera = [...q.trucos, ...q.conj, ...q.arcanum];
+  const fuera = [...q.trucos, ...q.conj, ...q.arcanum, ...suFueraRasgos(q)];
   if (fuera.length) { pj.conjuros = pj.conjuros.filter(i => !fuera.includes(i)); resumen.push('quita ' + nombresC(fuera)); }
   if (q.arcanum.length) h.arcanum = (h.arcanum || []).filter(i => !q.arcanum.includes(i));
   if (q.invoc.length) {
@@ -3855,6 +3881,8 @@ A.suConfirmar = () => {
   const de = k => (grupos.find(g => g.k === k) || {}).elegidos || [];
   if (p.arcanum || q.arcanum.length) h.arcanum = [...(h.arcanum || []), ...de('nArc'), ...de('cArc')];
   if (de('grimT').length || de('grimR').length) h.grimorio = [...(h.grimorio || []), ...de('grimT'), ...de('grimR')];
+  h.magia.forEach((m, i) => { const v = (q['magia' + i] || [])[0], x = de('cMag' + i)[0]; if (!v || !x) return; ['trucos', 'conjuros'].forEach(k => { m[k] = (m[k] || []).map(y => y === v ? x : y); }); });
+  if (q.descub.length) h.conjSiempre = [...(h.conjSiempre || []).filter(i => !q.descub.includes(i)), ...de('cDesc')];
   if (p.descub) h.conjSiempre = [...(h.conjSiempre || []), ...de('nDesc')];
   if (de('mc1').length || de('mc2').length) { h.maestriaConj = [...de('mc1'), ...de('mc2')]; resumen.push('maestría sobre ' + nombresC(h.maestriaConj)); }
   if (de('car3').length) { h.caracteristicos = de('car3'); resumen.push('conjuros característicos: ' + nombresC(h.caracteristicos)); }
